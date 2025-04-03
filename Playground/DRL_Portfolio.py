@@ -96,4 +96,5 @@ def generate_fund_data(n_funds: int, start_date: str, n_rows: int) -> pd.DataFra
 
 if __name__ == '__main__':
     ddf = generate_fund_data(5, '20200101', 600)
+
     print(ddf)

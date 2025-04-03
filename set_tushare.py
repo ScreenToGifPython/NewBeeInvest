@@ -7,5 +7,5 @@
 """
 import tushare as ts
 
-ts.set_token('token')
+ts.set_token('your_token_here')  # 替换为你的 Tushare token
 pro = ts.pro_api()
