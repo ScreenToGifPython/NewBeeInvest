@@ -34,7 +34,18 @@ def get_etf_info(drop_dlist=True, save_parquet=False):
     DataFrame: ETF的基本信息数据框。
     """
     # 获取ETF基本信息
-    etf_info_df = pro.fund_basic(market='E')
+    max_retries = 5
+    etf_info_df = None
+    for attempt in range(max_retries):
+        try:
+            etf_info_df = pro.fund_basic(market='E')
+        except Exception as e:
+            print(f"[重试 {attempt + 1}/{max_retries}] 获取 ETF 基本信息失败: {e}")
+            if attempt == max_retries - 1:
+                print("[错误] 最多重试已达上限，仍然失败")
+                print(traceback.format_exc())
+                return None  # 或 raise e 根据你的策略
+
     # 将ETF按list_date升序排列
     etf_info_df = etf_info_df.sort_values(by='list_date', ascending=True)
     # 剔除已经清盘的ETF
@@ -378,5 +389,5 @@ def get_etf_daily_data_increment():
 
 
 if __name__ == '__main__':
-    # get_etf_daily_data_all()
+    get_etf_daily_data_all()
     get_etf_daily_data_increment()
