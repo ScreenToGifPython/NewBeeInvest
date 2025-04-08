@@ -185,7 +185,7 @@ def rate_limit(calls_per_period=250, period=60):
             if len(call_timestamps) >= calls_per_period:
                 sleep_time = period - (current - call_timestamps[0])  # 计算需要等待的时间。
                 sleep_time = max(sleep_time, 1)  # 确保至少等待1秒
-                print(f"[限速] 超过调用限制，等待 {sleep_time:.2f} 秒...")  # 提示用户正在等待。
+                # print(f"[限速] 超过调用限制，等待 {sleep_time:.2f} 秒...")  # 提示用户正在等待。
                 time.sleep(sleep_time)  # 等待，以遵守速率限制。
                 return wrapper(*args, **kwargs)  # 递归调用
 
@@ -245,7 +245,7 @@ def get_etf_daily_data(etf_code, start_date='20040101', end_date=datetime.now().
 
 
 # 全量获取所有未清盘的ETF的每日数据，并将其保存到一个Parquet文件中
-def get_etf_daily_data_save_parquet():
+def get_etf_daily_data_all():
     """
     获取所有未清盘的ETF的每日数据，并将其保存到一个Parquet文件中。
     该函数首先获取所有ETF的代码和发行日期，然后为每个ETF获取每日数据，
@@ -287,22 +287,26 @@ def get_etf_daily_data_save_parquet():
 
     # 遍历所有ETF，获取并写入数据
     for etf_code, issue_date in tqdm(ts_issue_dict.items()):
-        try:
-            df = safe_get_etf_daily_data(code=etf_code, start_date=issue_date)
-            if df is not None and not df.empty:
-                # 将DataFrame转为Arrow表
-                table = pa.Table.from_pandas(df)
+        for attempt in range(5):
+            try:
+                df = safe_get_etf_daily_data(code=etf_code, start_date=issue_date)
+                if df is not None and not df.empty:
+                    # 将DataFrame转为Arrow表
+                    table = pa.Table.from_pandas(df)
 
-                # 如果是第一次写入，初始化writer
-                if writer is None:
-                    writer = pq.ParquetWriter(output_path, table.schema)
+                    # 如果是第一次写入，初始化writer
+                    if writer is None:
+                        writer = pq.ParquetWriter(output_path, table.schema)
 
-                # 进行增量写入
-                writer.write_table(table)
+                    # 进行增量写入
+                    writer.write_table(table)
+                    break  # 成功，退出重试循环
 
-        except Exception as e:
-            print(f"获取 {etf_code} 数据失败: {e}")
-            print(traceback.format_exc())
+            except Exception as e:
+                print(f"[重试 {attempt + 1}/5] 获取 {etf_code} 数据失败: {e}")
+                if attempt == 4:  # 第5次仍失败，打印详细堆栈
+                    print(f"获取 {etf_code} 数据失败: {e}")
+                    print(traceback.format_exc())
 
     '''4) 最后关闭 writer'''
     # 确保所有数据已被写入，并关闭writer
@@ -313,6 +317,66 @@ def get_etf_daily_data_save_parquet():
         print("[警告] 没有任何数据被写入")
 
 
+# 递增获取ETF每日数据并更新到parquet文件中
+def get_etf_daily_data_increment():
+    """
+    递增获取ETF每日数据并更新到parquet文件中。
+
+    该函数首先获取所有ETF的基本信息，
+    然后遍历每只ETF, 调用API获取从六天前到今天的数据。
+    如果获取数据成功, 则将数据追加到最终的数据集中。
+    最后，将新数据与原有的parquet文件中的数据合并去重，并重新保存为parquet文件。
+    """
+    # 获取ETF基本信息，并去重
+    ts_issue_list = get_etf_info().drop_duplicates(subset="ts_code", keep="first")["ts_code"].unique().tolist()
+    final_df = list()
+
+    # 遍历每只ETF，获取其每日数据（带重连机制）
+    for ts_code in tqdm(ts_issue_list):
+        for attempt in range(5):
+            try:
+                usb_df = safe_fund_daily(
+                    ts_code=ts_code,
+                    start_date=(datetime.today() - timedelta(days=6)).strftime('%Y%m%d'),
+                    end_date=datetime.now().strftime('%Y%m%d')
+                )
+                if usb_df is not None and not usb_df.empty:
+                    final_df.append(usb_df)
+                    break  # 成功跳出重试
+            except Exception as e:
+                print(f"[重试 {attempt + 1}/5] 获取 {ts_code} 数据失败: {e}")
+                if attempt == 4:  # 第3次还是失败
+                    print(f"获取 {ts_code} 数据失败: {e}")
+                    print(traceback.format_exc())
+
+    # 2. 合并新数据
+    if final_df is None or len(final_df) == 0:
+        print("无新数据，程序结束")
+
+    new_data = pd.concat(final_df, ignore_index=True)
+
+    # 3. 读取原 parquet 数据（如果存在）
+    parquet_path = "../data/etf_daily.parquet"
+    if os.path.exists(parquet_path):
+        old_data = pd.read_parquet(parquet_path)
+        # 备份原文件（新增逻辑）
+        today = datetime.today().strftime('%Y%m%d')
+        backup_path = f"../data/etf_daily_{today}.parquet"
+        os.rename(parquet_path, backup_path)
+        print(f"[备份] 原文件已备份为 {backup_path}")
+
+        # 合并新旧数据，并去重
+        combined_df = pd.concat([old_data, new_data], ignore_index=True)
+        combined_df = combined_df.drop_duplicates(subset=["ts_code", "trade_date"], keep="last")
+    else:
+        combined_df = new_data.drop_duplicates(subset=["ts_code", "trade_date"], keep="last")
+
+    # 4. 重写 parquet 文件
+    combined_df = combined_df.sort_values(by=["ts_code", "trade_date"]).reset_index(drop=True)
+    combined_df.to_parquet(parquet_path)
+    print(f"[完成] 已保存至 {parquet_path}，共 {len(combined_df)} 条记录")
+
+
 if __name__ == '__main__':
-    get_etf_daily_data_save_parquet()
-    # get_etf_daily_data('5020001.SH')
+    # get_etf_daily_data_all()
+    get_etf_daily_data_increment()
