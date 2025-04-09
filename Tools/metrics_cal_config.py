@@ -5,6 +5,7 @@
 @Author: Kevin-Chen
 @Descriptions: 金融指标计算参数文件
 """
+from collections import defaultdict
 
 # 年化收益率计算的天数
 return_ann_factor = 365
@@ -17,7 +18,6 @@ no_risk_ann_return = 0.015
 
 # 支持的区间代码
 period_list = [
-    '1d',  # 1天
     '2d',  # 2天
     '3d',  # 3天
     '1w',  # 1周
@@ -35,7 +35,6 @@ period_list = [
     'mtd',  # 本月至今（Month-to-Date）
     'qtd',  # 本季度至今（Quarter-to-Date）
     'ytd',  # 本年至今（Year-to-Date）
-    'max'  # 最大可用时间范围
 ]
 
 # 基于对数收益率计算的指标
@@ -49,7 +48,7 @@ log_return_metrics_dict = {
     'AnnualizedReturn':
         ['年化收益率',
          '年化收益率 = (1 + 总收益率)^(return_ann_factor/天数) - 1',
-         ['2d', '3d', '1w', '2w', '1m', '2m', '3m', '5m', '6m', '12m', '2y', '3y', '5y', 'mtd', 'qtd', 'ytd'],
+         ['1w', '2w', '1m', '2m', '3m', '5m', '6m', '12m', '2y', '3y', '5y', 'mtd', 'qtd', 'ytd'],
          ],
     'AverageDailyReturn':
         ['日均收益率',
@@ -59,7 +58,7 @@ log_return_metrics_dict = {
     'MedianDailyReturn':
         ['日中位收益率',
          '日中位收益率 = 所有日收益率的中位数',
-         ['2d', '3d', '1w', '2w', '1m', '2m', '3m', '5m', '6m', '12m', '2y', '3y', '5y', 'mtd', 'qtd', 'ytd'],
+         ['1w', '2w', '1m', '2m', '3m', '5m', '6m', '12m', '2y', '3y', '5y', 'mtd', 'qtd', 'ytd'],
          ],
     'Volatility':
         ['波动率',
@@ -535,3 +534,27 @@ log_return_relative_metrics_dict = {
          ['1d', '2d', '3d', '1w' '2w', '1m', '2m', '3m', '5m', '6m', '1y', 'mtd', 'qtd'],
          ],
 }
+
+
+# 创建一个按周期分组的指标映射表
+def create_period_metrics_map():
+    """
+    创建一个按周期分组的指标映射表。
+
+    该函数遍历 `log_return_metrics_dict` 中的每个指标，根据指标的周期将其分组，
+    最终返回一个字典，其中键为周期，值为该周期下的所有指标键列表。
+
+    返回值:
+        dict: 一个字典，键为周期，值为该周期下的所有指标键列表。
+    """
+    # 初始化一个字典，默认值为列表
+    period_metrics_map = defaultdict(list)
+
+    # 遍历 log_return_metrics_dict 中的每个指标
+    for metric_key, (name, formula, periods) in log_return_metrics_dict.items():
+        # 遍历该指标的所有周期，并将指标键添加到对应周期的列表中
+        for period in periods:
+            period_metrics_map[period].append(metric_key)
+
+    # 转换为普通字典并返回
+    return dict(period_metrics_map)
