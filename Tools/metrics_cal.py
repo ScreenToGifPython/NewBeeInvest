@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 from functools import wraps
 
-from Tools.metrics_cal_config import return_ann_factor, risk_ann_factor
+from Tools.metrics_cal_config import return_ann_factor, risk_ann_factor, log_ann_return, log_daily_return
 
 warnings.filterwarnings("ignore")
 pd.set_option('display.width', 1000)  # 表格不分段显示
@@ -66,13 +66,15 @@ def cache_metric(func):
 
 
 class CalMetrics:
-    def __init__(self, log_return_array, close_price_array, days_in_p, trans_to_cumulative_return=False):
+    def __init__(self, log_return_array, close_price_array, nature_days_in_p, trading_days_in_p,
+                 trans_to_cumulative_return=False):
         self.return_array = log_return_array
         self.price_array = close_price_array
-        self.days_in_p = days_in_p
+        self.nature_days = nature_days_in_p
+        self.trading_days = trading_days_in_p
         self.cum_rtn = trans_to_cumulative_return
-        self.res_dict = dict()
         self.n_days, self.n_funds = log_return_array.shape
+        self.res_dict = dict()
 
     @cache_metric  # 累积收益率
     def cal_TotalReturn(self, **kwargs):
@@ -87,9 +89,9 @@ class CalMetrics:
         total_rtn = self.cal_TotalReturn()
 
         if not self.cum_rtn:  # 判断累计收益率的计算逻辑
-            return (total_rtn / self.days_in_p) * return_ann_factor  # 使用对数收益率
+            return (total_rtn / self.nature_days) * return_ann_factor  # 使用对数收益率
         else:
-            return (total_rtn + 1) ** (return_ann_factor / self.days_in_p) - 1  # 使用简单收益率
+            return (total_rtn + 1) ** (return_ann_factor / self.nature_days) - 1  # 使用简单收益率
 
     @cache_metric  # 每日回报率的平均值
     def cal_AverageDailyReturn(self, **kwargs):
@@ -102,6 +104,10 @@ class CalMetrics:
     @cache_metric  # 每日回报率波动率
     def cal_Volatility(self, **kwargs):
         return np.nanstd(self.return_array, axis=0, ddof=1)
+
+    @cache_metric  # 年化波动率
+    def cal_AnnualizedVolatility(self):
+        return self.cal_Volatility() * np.sqrt(risk_ann_factor)
 
     @cache_metric  # 计算所有最大回撤相关的指标
     def cal_max_draw_down_for_all(self, metric_name: str, **kwargs) -> float:
@@ -148,7 +154,7 @@ class CalMetrics:
         total_return = np.exp(self.cal_TotalReturn()) - 1
         # 计算收益回撤比（普通和年化版本）
         r_dd = total_return / np.abs(max_dd)
-        ann_r_dd = (((total_return + 1) ** (return_ann_factor / self.days_in_p) - 1) / np.abs(max_dd))
+        ann_r_dd = (((total_return + 1) ** (return_ann_factor / self.nature_days) - 1) / np.abs(max_dd))
         # 处理无穷大情况
         self.res_dict['ReturnDrawDownRatio'] = np.where(r_dd == -np.inf, 0, r_dd)
         self.res_dict['AnnReturnDrawDownRatio'] = np.where(ann_r_dd == -np.inf, 0, ann_r_dd)
@@ -161,9 +167,83 @@ class CalMetrics:
         ''' (7) 返回指定指标结果 '''
         return self.res_dict[metric_name]
 
-    @cache_metric  # 年化波动率
-    def cal_AnnualizedVolatility(self):
-        return self.cal_Volatility() * np.sqrt(risk_ann_factor)
+    @cache_metric  # 年化夏普比率
+    def cal_AnnualizedSharpeRatio(self, **kwargs):
+        ratio = (self.cal_AnnualizedReturn() - log_ann_return) / self.cal_AnnualizedVolatility()
+        return np.where(np.isnan(ratio), 0, ratio)
+
+    @cache_metric  # 索提诺比率
+    def cal_SharpeRatio(self, **kwargs):
+        ratio = (self.cal_TotalReturn() - (log_daily_return * self.nature_days)) / self.cal_Volatility()
+        return np.where(np.isnan(ratio), 0, ratio)
+
+    @cache_metric  # 收益率波动率比
+    def cal_ReturnVolatilityRatio(self, **kwargs):
+        ratio = self.cal_TotalReturn() / self.cal_Volatility()
+        return np.where(np.isnan(ratio), 0, ratio)
+
+    @cache_metric  # 下行波动率
+    def cal_DownsideVolatility(self, mar=0, **kwargs):
+        # 计算低于 MAR 的差值，否则为 0
+        down_diff = np.where(self.return_array < mar, self.return_array - mar, 0.0)
+        # 计算方差（1个自由度）
+        downside_var = np.nanvar(down_diff, axis=0, ddof=1)
+        # 返回标准差（即下行波动率）
+        ratio = np.sqrt(downside_var)
+        return np.where(np.isnan(ratio), 0, ratio)
+
+    @cache_metric  # 上行波动率
+    def cal_UpsideVolatility(self, mar=0, **kwargs):
+        # 对于超过 MAR 的收益部分，计算偏差；其余为 0
+        up_diff = np.where(self.return_array > mar, self.return_array - mar, 0.0)
+        # 计算上行方差（忽略 nan，支持自由度）
+        upside_var = np.nanvar(up_diff, axis=0, ddof=1)
+        # 返回上行标准差
+        ratio = np.sqrt(upside_var)
+        return np.where(np.isnan(ratio), 0, ratio)
+
+    @cache_metric  # 波动率偏度
+    def cal_VolatilitySkew(self, **kwargs):
+        ratio = (self.cal_UpsideVolatility() - self.cal_DownsideVolatility()) / self.cal_Volatility()
+        return np.where(np.isnan(ratio), 0, ratio)
+
+    @cache_metric  # 波动率比率
+    def cal_VolatilityRatio(self, **kwargs):
+        ratio = self.cal_UpsideVolatility() / self.cal_DownsideVolatility()
+        return np.where(np.isnan(ratio), 0, ratio)
+
+    @cache_metric  # 索提诺比率
+    def cal_SortinoRatio(self, **kwargs):
+        ratio = (self.cal_TotalReturn() - (log_daily_return * self.nature_days)) / self.cal_DownsideVolatility()
+        return np.where(np.isnan(ratio), 0, ratio)
+
+    @cache_metric  # 收益趋势一致性
+    def cal_GainConsistency(self, **kwargs):
+        # 筛选正收益
+        gain_only = np.where(self.return_array > 0, self.return_array, np.nan)
+
+        # 计算均值和标准差（忽略 nan）
+        gain_mean = np.nanmean(gain_only, axis=0)  # shape = (N,)
+        gain_std = np.nanstd(gain_only, axis=0)  # shape = (N,)
+
+        # 避免除以 0 或 nan
+        gain_consistency = gain_std / gain_mean
+
+        return np.where(np.isnan(gain_consistency), 0, gain_consistency)
+
+    @cache_metric  # 收益率偏度
+    def cal_LossConsistency(self, **kwargs):
+        # 筛选负收益
+        loss_only = np.where(self.return_array < 0, self.return_array, np.nan)
+
+        # 计算负收益的平均值和标准差
+        loss_mean = np.nanmean(loss_only, axis=0)  # 为负值
+        loss_std = np.nanstd(loss_only, axis=0)
+
+        # 用 abs(loss_mean) 避免除以负值
+        loss_consistency = loss_std / np.abs(loss_mean)
+
+        return np.where(np.isnan(loss_consistency), 0, loss_consistency)
 
     @cache_metric  # 平均绝对偏差
     def cal_MeanAbsoluteDeviation(self, **kwargs):
@@ -206,7 +286,7 @@ class CalMetrics:
                 print(f"Error when calling '{method_name}': {e}")
                 print(traceback.format_exc())
         else:
-            print(f"Method '{method_name}' does not exist. 该方法不存在! 请确认是否有该指标!")
+            print(f"该方法不存在! Method '{method_name}' does not exist. 请确认是否有该指标!")
 
 
 if __name__ == '__main__':
@@ -223,10 +303,10 @@ if __name__ == '__main__':
     the_close_price_array = the_close_price_array[~np.all(np.isnan(the_close_price_array), axis=1)]
     the_log_return_df = the_log_return_df[~np.all(np.isnan(the_log_return_df), axis=1)]
     the_close_price_array[:, 3] = 1
-    the_close_price_array[:, 3] = 1
+    the_log_return_df[:, 3] = 0.001
 
-    c_m = CalMetrics(the_log_return_df, the_close_price_array[::-1, :], 50)
-    res = c_m.cal_metric('MaxDrawDown')
-    res_q = c_m.cal_metric('MaxDrawDownDays')
-    res_u = c_m.cal_metric('UlcerIndex')
-    print(c_m.res_dict)
+    c_m = CalMetrics(the_log_return_df, the_close_price_array, 61, 50)
+    res = c_m.cal_metric('SharpeRatio')
+    print(res)
+    res = c_m.cal_metric('SortinoRatio')
+    print(res)

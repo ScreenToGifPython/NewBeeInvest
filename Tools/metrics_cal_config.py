@@ -5,16 +5,22 @@
 @Author: Kevin-Chen
 @Descriptions: 金融指标计算参数文件
 """
+import numpy as np
 from collections import defaultdict
 
 # 年化收益率计算的天数
 return_ann_factor = 365
-
 # 年化波动率计算的天数
 risk_ann_factor = 252
 
-# 无风险年化收益率
+# 无风险普通年化收益率
 no_risk_ann_return = 0.015
+# 无风险普通每日收益率 (使用 自然日or交易日 ? 请自由调整)
+daily_return = (1 + no_risk_ann_return) ** (1 / return_ann_factor) - 1
+# 无风险对数每日收益率
+log_daily_return = np.log(1 + daily_return)
+# 无风险对数年化收益率
+log_ann_return = np.log(1 + no_risk_ann_return)
 
 # 支持的区间代码
 period_list = [
@@ -132,7 +138,7 @@ log_return_metrics_dict = {
          ],
     'SharpeRatio':
         ['夏普比率',
-         '夏普比率 = (平均日收益率 - 日无风险收益) / 投资组合波动率',
+         '夏普比率 = (累计收益率 - 无风险收益) / 投资组合波动率',
          ['1w', '2w', '1m', '2m', '3m', '5m', '6m', '12m', '2y', '3y', '5y', 'mtd', 'qtd', 'ytd'],
          ],
     'AnnualizedSharpeRatio':
@@ -145,14 +151,39 @@ log_return_metrics_dict = {
          '收益率波动率比 = 总收益率 / 波动率',
          ['1w', '2w', '1m', '2m', '3m', '5m', '6m', '12m', '2y', '3y', '5y', 'mtd', 'qtd', 'ytd'],
          ],
-    'SortinoRatio':
-        ['索提诺比率',
-         '索提诺比率 = (投资组合收益率 - 无风险收益率) / 下行波动率',
+    'DownsideVolatility':
+        ['下行波动率',
+         '下行波动率 = 负收益率的标准差',
          ['1w', '2w', '1m', '2m', '3m', '5m', '6m', '12m', '2y', '3y', '5y', 'mtd', 'qtd', 'ytd'],
          ],
-    'ReturnStability':
-        ['收益率稳定性',
-         '收益率稳定性 = 收益率的稳定性指标（如标准差）',
+    'UpsideVolatility':
+        ['上行波动率',
+         '上行波动率 = 正收益率的标准差',
+         ['1w', '2w', '1m', '2m', '3m', '5m', '6m', '12m', '2y', '3y', '5y', 'mtd', 'qtd', 'ytd'],
+         ],
+    'VolatilitySkew':
+        ['波动率偏度',
+         '波动率偏度 = (上行波动率 - 下行波动率) / 总波动率',
+         ['1w', '2w', '1m', '2m', '3m', '5m', '6m', '12m', '2y', '3y', '5y', 'mtd', 'qtd', 'ytd'],
+         ],
+    'VolatilityRatio':
+        ['波动率比',
+         '波动率比 = 上行波动率 / 下行波动率',
+         ['1w', '2w', '1m', '2m', '3m', '5m', '6m', '12m', '2y', '3y', '5y', 'mtd', 'qtd', 'ytd'],
+         ],
+    'SortinoRatio':
+        ['索提诺比率',
+         '索提诺比率 = (累计收益率 - 无风险收益率) / 下行波动率',
+         ['1w', '2w', '1m', '2m', '3m', '5m', '6m', '12m', '2y', '3y', '5y', 'mtd', 'qtd', 'ytd'],
+         ],
+    'GainConsistency':
+        ['收益趋势一致性',
+         '收益趋势一致性 = 盈利日的标准差(上行波动率) / 盈利日的平均收益(平均正收益率)',
+         ['1w', '2w', '1m', '2m', '3m', '5m', '6m', '12m', '2y', '3y', '5y', 'mtd', 'qtd', 'ytd'],
+         ],
+    'LossConsistency':
+        ['亏损趋势一致性',
+         '亏损趋势一致性 = 亏损日的标准差(下行波动率) / 亏损日的平均亏损(平均负收益率)',
          ['1w', '2w', '1m', '2m', '3m', '5m', '6m', '12m', '2y', '3y', '5y', 'mtd', 'qtd', 'ytd'],
          ],
     'WinningRatio':
@@ -203,36 +234,6 @@ log_return_metrics_dict = {
     'ReturnKurtosis':
         ['收益率峰度',
          '收益率峰度 = 收益率分布的峰度',
-         ['1w', '2w', '1m', '2m', '3m', '5m', '6m', '12m', '2y', '3y', '5y', 'mtd', 'qtd', 'ytd'],
-         ],
-    'DownsideVolatility':
-        ['下行波动率',
-         '下行波动率 = 负收益率的标准差',
-         ['1w', '2w', '1m', '2m', '3m', '5m', '6m', '12m', '2y', '3y', '5y', 'mtd', 'qtd', 'ytd'],
-         ],
-    'UpsideVolatility':
-        ['上行波动率',
-         '上行波动率 = 正收益率的标准差',
-         ['1w', '2w', '1m', '2m', '3m', '5m', '6m', '12m', '2y', '3y', '5y', 'mtd', 'qtd', 'ytd'],
-         ],
-    'VolatilitySkew':
-        ['波动率偏度',
-         '波动率偏度 = (上行波动率 - 下行波动率) / 总波动率',
-         ['1w', '2w', '1m', '2m', '3m', '5m', '6m', '12m', '2y', '3y', '5y', 'mtd', 'qtd', 'ytd'],
-         ],
-    'VolatilityRatio':
-        ['波动率比',
-         '波动率比 = 上行波动率 / 下行波动率',
-         ['1w', '2w', '1m', '2m', '3m', '5m', '6m', '12m', '2y', '3y', '5y', 'mtd', 'qtd', 'ytd'],
-         ],
-    'GainConsistency':
-        ['收益趋势一致性',
-         '收益趋势一致性 = 盈利日的标准差(上行波动率) / 盈利日的平均收益(平均正收益率)',
-         ['1w', '2w', '1m', '2m', '3m', '5m', '6m', '12m', '2y', '3y', '5y', 'mtd', 'qtd', 'ytd'],
-         ],
-    'LossConsistency':
-        ['亏损趋势一致性',
-         '亏损趋势一致性 = 亏损日的标准差(下行波动率) / 亏损日的平均亏损(平均负收益率)',
          ['1w', '2w', '1m', '2m', '3m', '5m', '6m', '12m', '2y', '3y', '5y', 'mtd', 'qtd', 'ytd'],
          ],
     'MaxConsecutiveWinsDays':
