@@ -97,6 +97,32 @@ class CalMetrics:
     def cal_AverageDailyReturn(self, **kwargs):
         return np.nanmean(self.return_array, axis=0)
 
+    @cache_metric  # 平均正收益率
+    def cal_AvgPositiveReturn(self, **kwargs):
+        return np.nanmean(np.where(self.return_array > 0, self.return_array, 0), axis=0)
+
+    @cache_metric  # 平均负收益率
+    def cal_AvgNegativeReturn(self, **kwargs):
+        return np.nanmean(np.where(self.return_array < 0, self.return_array, 0), axis=0)
+
+    @cache_metric  # 平均盈亏比
+    def cal_AvgReturnRatio(self, **kwargs):
+        ratio = self.cal_AvgPositiveReturn / self.cal_AvgNegativeReturn
+        return np.where(np.isnan(ratio), 0, ratio)
+
+    @cache_metric  # 总累计盈利 = 所有正收益的总和
+    def cal_TotalPositiveReturn(self, **kwargs):
+        return np.nansum(np.where(self.return_array > 0, self.return_array, 0), axis=0)
+
+    @cache_metric  # 总累计亏损 = 所有负收益的总和
+    def cal_TotalNegativeReturn(self, **kwargs):
+        return np.nansum(np.where(self.return_array < 0, self.return_array, 0), axis=0)
+
+    @cache_metric  # 盈利总和 / 亏损总和
+    def cal_TotalReturnRatio(self, **kwargs):
+        ratio = self.cal_TotalPositiveReturn() / np.abs(self.cal_TotalNegativeReturn())
+        return np.where(np.isnan(ratio), 0, ratio)
+
     @cache_metric  # 每日回报率的中位数
     def cal_MedianDailyReturn(self, **kwargs):
         return np.nanmedian(self.return_array, axis=0)
@@ -104,6 +130,18 @@ class CalMetrics:
     @cache_metric  # 每日回报率波动率
     def cal_Volatility(self, **kwargs):
         return np.nanstd(self.return_array, axis=0, ddof=1)
+
+    @cache_metric  # 收益率范围
+    def cal_ReturnRange(self, **kwargs):
+        return self.cal_MaxGain() - self.cal_MaxLoss()
+
+    @cache_metric  # 最大单日收益
+    def cal_MaxGain(self, **kwargs):
+        return np.nanmax(self.return_array, axis=0)
+
+    @cache_metric  # 最大单日亏损
+    def cal_MaxLoss(self, **kwargs):
+        return np.nanmin(self.return_array, axis=0)
 
     @cache_metric  # 年化波动率
     def cal_AnnualizedVolatility(self):
@@ -245,21 +283,75 @@ class CalMetrics:
 
         return np.where(np.isnan(loss_consistency), 0, loss_consistency)
 
+    @cache_metric  # 计算盈利率
+    def cal_WinningRatio(self, **kwargs):
+        # 计算胜率
+        return (np.sum((self.return_array > 0) & ~np.isnan(self.return_array), axis=0)
+                / np.sum(~np.isnan(self.return_array), axis=0))
+
+    @cache_metric  # 计算亏损率
+    def cal_LosingRatio(self, **kwargs):
+        # 计算亏损率
+        return (np.sum((self.return_array < 0) & ~np.isnan(self.return_array), axis=0)
+                / np.sum(~np.isnan(self.return_array), axis=0))
+
     @cache_metric  # 平均绝对偏差
     def cal_MeanAbsoluteDeviation(self, **kwargs):
         return np.nanmean(np.abs(self.return_array - self.cal_AverageDailyReturn()), axis=0)
 
-    @cache_metric  # 最大单日收益
-    def cal_MaxGain(self, **kwargs):
-        return np.nanmax(self.return_array, axis=0)
+    @cache_metric  # 收益率偏度
+    def cal_ReturnSkewness(self, **kwargs):
+        # 均值和标准差
+        mean = self.cal_AverageDailyReturn()
+        std = self.cal_Volatility()
+        # 中心化后的三阶矩
+        centered = self.return_array - mean
+        third_moment = np.nanmean(centered ** 3, axis=0)
+        # 偏度计算
+        skewness = third_moment / (std ** 3)
+        return skewness
 
-    @cache_metric  # 最大单日亏损
-    def cal_MaxLoss(self, **kwargs):
-        return np.nanmin(self.return_array, axis=0)
+    @cache_metric  # 收益率峰度
+    def cal_ReturnKurtosis(self, excess=True, **kwargs):
+        # 均值和标准差
+        mean = self.cal_AverageDailyReturn()
+        std = self.cal_Volatility()
+        # 中心化后的四阶矩
+        centered = self.return_array - mean
+        fourth_moment = np.nanmean(centered ** 4, axis=0)
+        # 峰度计算
+        kurtosis = fourth_moment / (std ** 4)
+        # 对 std 为 0 的列，设为 NaN（避免除以 0）
+        kurtosis = np.where(std == 0, np.nan, kurtosis)
+        if excess:
+            kurtosis -= 3  # 返回超额峰度
+        return kurtosis
 
-    @cache_metric  # 收益率范围
-    def cal_ReturnRange(self, **kwargs):
-        return self.cal_MaxGain() - self.cal_MaxLoss()
+    @cache_metric
+    def cal_MaxConsecutiveWinsDays(self, **kwargs):
+        # 先将正收益标为 1，其他为 0（不包含0）
+        win_flags = (self.return_array > 0).astype(int)
+
+        # 结果数组
+        max_streaks = np.zeros(win_flags.shape[1], dtype=int)
+
+        for i in range(win_flags.shape[1]):
+            series = win_flags[:, i]
+            # 处理 NaN 为 0，避免中断 streak
+            series = np.nan_to_num(series, nan=0).astype(int)
+
+            # 使用累加法识别连续段
+            max_len = 0
+            current_len = 0
+            for val in series:
+                if val == 1:
+                    current_len += 1
+                    max_len = max(max_len, current_len)
+                else:
+                    current_len = 0
+            max_streaks[i] = max_len
+
+        return max_streaks
 
     # 调用不同指标计算的函数
     def cal_metric(self, metric_name, **kwargs):
@@ -303,10 +395,11 @@ if __name__ == '__main__':
     the_close_price_array = the_close_price_array[~np.all(np.isnan(the_close_price_array), axis=1)]
     the_log_return_df = the_log_return_df[~np.all(np.isnan(the_log_return_df), axis=1)]
     the_close_price_array[:, 3] = 1
-    the_log_return_df[:, 3] = 0.001
+    the_log_return_df[:, 3] = -0.001
+    the_log_return_df[:, 1] = 0.001
 
     c_m = CalMetrics(the_log_return_df, the_close_price_array, 61, 50)
-    res = c_m.cal_metric('SharpeRatio')
+    res = c_m.cal_metric('ReturnSkewness')
     print(res)
-    res = c_m.cal_metric('SortinoRatio')
+    res = c_m.cal_metric('ReturnKurtosis')
     print(res)
