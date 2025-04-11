@@ -172,8 +172,29 @@ def get_start_date(last_day, period):
 
 
 def find_date_range_indices(nature_days_array, start_date, end_date):
+    """
+    在给定的自然日数组中找到指定日期范围的索引。
+
+    本函数使用二分查找算法来确定start_date和end_date在自然日数组中的位置，
+    从而可以有效地找到指定日期范围内的所有日期。
+
+    参数:
+    nature_days_array (numpy.ndarray): 包含自然日的numpy数组，必须是升序排列。
+    start_date (datetime.datetime): 指定日期范围的开始日期。
+    end_date (datetime.datetime): 指定日期范围的结束日期。
+
+    返回:
+    tuple: 一个元组，包含两个整数，分别是指定日期范围在自然日数组中的开始和结束索引。
+    """
+
+    # 找到start_date在nature_days_array中的插入位置，这将是开始索引
     start_idx = np.searchsorted(nature_days_array, start_date, side='left')
+
+    # 找到end_date在nature_days_array中的插入位置，然后减一，这将是结束索引
+    # 减一的原因是np.searchsorted找到的是end_date之后的位置，我们需要的是end_date的索引
     end_idx = np.searchsorted(nature_days_array, end_date, side='right') - 1
+
+    # 返回开始和结束索引
     return start_idx, end_idx
 
 
@@ -234,7 +255,7 @@ def compute_metrics_for_period_initialize(log_return_df, close_price_df):
                              in_p_close_price_array,
                              period,
                              days_in_p,
-                             end_date)
+                             end_date, 5)
             sub_df = c_m.cal_metric_main(period_metrics_map[period])
             final_df.append(sub_df)
         # 将所有区间的指标数据合并

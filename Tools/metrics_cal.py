@@ -261,16 +261,50 @@ def compute_net_equity_metrics(price_array):
 
 # 金融指标计算器类
 class CalMetrics:
-    def __init__(self, fund_codes, log_return_array, close_price_array, time_zone_code, nature_days_in_p, end_date,
+    """
+    用于计算和存储基金业绩评估指标的类。
+
+    根据给定的基金代码、对数收益率数组、收盘价数组、时区代码、自然日数量和截止日期，
+    以及是否将收益率转换为累计收益率的选项，初始化基金业绩评估指标计算。
+
+    参数:
+    - fund_codes (list / numpy.ndarray): 基金代码列表。
+    - log_return_array (numpy.ndarray): 基金的对数收益率数组。
+    - close_price_array (numpy.ndarray): 基金的收盘价数组。
+    - time_zone_code (str): 时区代码。
+    - nature_days_in_p (int): 自然日数量。
+    - end_date (str): 结束日期。
+    - min_data_required (int): 最少数据要求条数。
+    - trans_to_cumulative_return (bool, optional): 是否将收益率转换为累计收益率，默认为False。
+    """
+
+    def __init__(self, fund_codes,
+                 log_return_array,
+                 close_price_array,
+                 time_zone_code,
+                 nature_days_in_p,
+                 end_date,
+                 min_data_required=5,
                  trans_to_cumulative_return=False):
+        # 初始化基金代码列表
         self.fund_codes = fund_codes
+        # 移除对数收益率数组中的全NaN行，并存储为返回数组
         self.return_array = log_return_array[~np.all(np.isnan(log_return_array), axis=1)]
+        # 移除收盘价数组中的全NaN行，并存储为价格数组
         self.price_array = close_price_array[~np.all(np.isnan(close_price_array), axis=1)]
+        # 存储时区代码
         self.time_zone_code = time_zone_code
+        # 存储自然日数量
         self.nature_days = nature_days_in_p
+        # 存储是否将收益率转换为累计收益率的选项
         self.cum_rtn = trans_to_cumulative_return
+        # 存储结束日期
         self.end_date = end_date
+        # 最少需要的数据量
+        self.min_data_required = min_data_required,
+        # 计算并存储返回数组的行数和列数，分别代表天数和基金数量
         self.n_days, self.n_funds = self.return_array.shape
+        # 初始化结果字典，用于存储后续计算的业绩评估指标
         self.res_dict = dict()
 
     @cache_metric  # 累积收益率
@@ -997,9 +1031,13 @@ class CalMetrics:
         # 计算各个指标值
         final_df = list()
         for metric_name in metric_name_list:
+            valid_counts = np.sum(~np.isnan(self.return_array), axis=0)
+            res_array = self.cal_metric(metric_name, **kwargs).astype(float)
+            res_array[valid_counts < self.min_data_required] = np.nan
+
             final_df.append(pd.DataFrame({
                 "ts_code": self.fund_codes,
-                "metric_value": self.cal_metric(metric_name, **kwargs),
+                "metric_value": res_array,
                 "metric_name": metric_name,
                 "date": self.end_date
             }))
