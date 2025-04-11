@@ -56,8 +56,13 @@ def cache_metric(func):
         # 如果指标已经存在于缓存中，则直接返回缓存中的值
         if metric_name in self.res_dict:
             return self.res_dict[metric_name]
+
+        # VaR / CVaR 指标特殊处理
         if metric_name.startswith('VaR') or metric_name.startswith('CVaR'):
             metric_name = metric_name + '-' + str(int(kwargs["confidence_level"] * 100))
+        # 分位数指标特殊处理
+        elif metric_name.startswith('Percentile') or metric_name.startswith('TailRatio'):
+            metric_name = metric_name + '-' + str(int(kwargs["tile"]))
 
         # 调用被装饰函数计算结果，并将结果缓存到 `self.res_dict` 中
         result = func(self, *args, **kwargs)
@@ -405,6 +410,45 @@ class CalMetrics:
         ratio = np.where(np.isinf(ratio), 0, ratio)
         return np.where(np.isnan(ratio), 0, ratio)
 
+    @cache_metric  # 计算收益率的分位数 (考虑所有收益率)
+    def cal_Percentile(self, tile=5, **kwargs):
+        perc_tile = np.nanpercentile(self.return_array, tile, axis=0)
+        return perc_tile
+
+    @cache_metric  # 计算收益率的分位数 (仅仅考虑正收益率)
+    def cal_PercentileWin(self, tile=95, **kwargs):
+        # 替换负值为 NaN，只保留正收益
+        positive_only = np.where(self.return_array > 0, self.return_array, np.nan)
+        # 计算分位（即最差的前5%盈利）
+        perc_tile = np.nanpercentile(positive_only, tile, axis=0)
+        # 任何负值或 nan 都设为0
+        return np.where(np.isnan(perc_tile), 0.0, perc_tile)
+
+    @cache_metric  # 计算收益率的分位数 (仅仅考虑负收益率, 并且负收益取绝对值)
+    def cal_PercentileLoss(self, tile=95, **kwargs):
+        # 替换正值为 NaN，只保留负收益
+        negative_only = np.where(self.return_array < 0, self.return_array, np.nan)
+        # 负收益率取绝对值
+        negative_only = np.abs(negative_only)
+        # 计算分位（即最严重的亏损）
+        perc_tile = np.nanpercentile(negative_only, tile, axis=0)
+        # 任何正值或 nan 都设为0
+        return np.where(np.isnan(perc_tile), 0.0, perc_tile)
+
+    @cache_metric
+    def cal_TailRatio(self, tile=95, **kwargs):
+        win_name = 'PercentileWin' + '-' + str(int(tile))
+        loss_name = 'PercentileLoss' + '-' + str(int(tile))
+        # 计算盈利和亏损的分位数
+        win = self.cal_metric(win_name)
+        loss = self.cal_metric(loss_name)
+
+        # 设置极小值防止除以 0 或非常接近 0 导致爆炸
+        eps = 1e-6
+        safe_loss = np.where(np.abs(loss) < eps, eps, loss)
+
+        return win / safe_loss
+
     # 调用不同指标计算的函数
     def cal_metric(self, metric_name, **kwargs):
         """
@@ -422,19 +466,18 @@ class CalMetrics:
                            'AnnReturnDrawDownRatio', 'DrawDownSlope', 'UlcerIndex']:
             return self.cal_max_draw_down_for_all(metric_name)
         # VaR 指标的处理
-        elif metric_name.startswith('VaR'):
+        elif metric_name.startswith('VaR') or metric_name.startswith('CVaR'):
             kwargs["confidence_level"] = float(metric_name.split("-")[1]) / 100
             metric_name = metric_name.split("-")[0]
-        # CVaR 指标的处理
-        elif metric_name.startswith('CVaR'):
-            kwargs["confidence_level"] = float(metric_name.split("-")[1]) / 100
+        # 分位数指标的处理
+        elif metric_name.startswith('Percentile') or metric_name.startswith('TailRatio'):
+            kwargs["tile"] = float(metric_name.split("-")[1])
             metric_name = metric_name.split("-")[0]
 
         method_name = f'cal_{metric_name}'
         try:
             return getattr(self, method_name)(**kwargs)
         except Exception as e:
-            print(f"该方法不存在! Method '{method_name}' does not exist. 请确认是否有该指标!")
             print(f"Error when calling '{method_name}': {e}")
             print(traceback.format_exc())
 
@@ -457,8 +500,8 @@ if __name__ == '__main__':
     # the_log_return_df[:, 1] = 0.001
 
     c_m = CalMetrics(the_log_return_df, the_close_price_array, 61, 50)
-    res = c_m.cal_metric('CVaR-90')
+    res = c_m.cal_metric('TailRatio-90')
     print(res)
-    res = c_m.cal_metric('CVaRModified-90')
+    res = c_m.cal_metric('TailRatio-95')
     print(res)
     print(c_m.res_dict)
