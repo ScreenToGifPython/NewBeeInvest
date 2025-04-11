@@ -416,11 +416,11 @@ log_return_metrics_dict = {
          '交叉乘积比率 = (WW * LL) / (WL * LW)',
          ['3m', '5m', '6m', '12m', '2y', '3y', '5y', 'mtd', 'qtd', 'ytd'],
          ],
-    # 'HurstExponent':  # 计算资源较大,涉及线性回归,无法矢量化
-    #     ['赫斯特指数',
-    #      '赫斯特指数 = 对净值构造时间序列，进行 R/S 分析',
-    #      ['2m', '3m', '5m', '6m', '12m', '2y', '3y', '5y', 'qtd', 'ytd'],
-    #      ],
+    'HurstExponent':  # 计算资源较大,涉及线性回归,无法矢量化
+        ['赫斯特指数',
+         '赫斯特指数 = 对净值构造时间序列，进行 R/S 分析',
+         ['2m', '3m', '5m', '6m', '12m', '2y', '3y', '5y', 'qtd', 'ytd'],
+         ],
     'OmegaRatio':
         ['欧米茄比率',
          '欧米茄比率 = 更全面的夏普比率扩展版本（考虑全部分布）',
@@ -429,6 +429,11 @@ log_return_metrics_dict = {
     'ReturnDistributionIntegral':
         ['收益分布积分',
          '收益分布积分 = Omega Ratio 的分子部分',
+         ['1m', '2m', '3m', '5m', '6m', '12m', '2y', '3y', '5y', 'mtd', 'qtd', 'ytd'],
+         ],
+    "ReturnSlope":
+        ['收益斜率',
+         '收益斜率 = 收益率拟合直线的 slope',
          ['1m', '2m', '3m', '5m', '6m', '12m', '2y', '3y', '5y', 'mtd', 'qtd', 'ytd'],
          ],
     'KRatio':

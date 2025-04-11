@@ -5,12 +5,14 @@
 @Author: Kevin-Chen
 @Descriptions: 金融指标计算器
 """
+import time
 import warnings
 import traceback
 import numpy as np
 import pandas as pd
 from functools import wraps
-from scipy.stats import norm, kurtosis, skew
+from numba import prange, float64, njit
+from scipy.stats import norm, kurtosis, skew, linregress
 
 from Tools.metrics_cal_config import return_ann_factor, risk_ann_factor, log_ann_return, log_daily_return
 
@@ -50,8 +52,12 @@ def cache_metric(func):
         Returns:
             Any: 返回被装饰函数的计算结果或缓存中的值。
         """
-        # 从函数名中提取指标名称，去掉前缀 "cal_"
-        metric_name = func.__name__.replace("cal_", "")
+        # 判断是否已经传入指标名称了, 例如: cal_max_draw_down_for_all() 和 cal_k_ratio_all() 函数
+        if 'metric_name' in kwargs:
+            metric_name = kwargs["metric_name"]
+        else:
+            # 从函数名中提取指标名称，去掉前缀 "cal_"
+            metric_name = func.__name__.replace("cal_", "")
 
         # 如果指标已经存在于缓存中，则直接返回缓存中的值
         if metric_name in self.res_dict:
@@ -74,6 +80,133 @@ def cache_metric(func):
         return result
 
     return wrapper
+
+
+@njit
+def calculate_hurst_exponent(portfolio_return):
+    """
+    计算hurst指数，用于判断时间序列的长期趋势是呈现自相似性还是anti-self-similarity。
+
+    参数:
+    portfolio_return: 一维ndarray，表示投资组合的回报序列。
+
+    返回值:
+    float，hurst指数。如果输入数据长度不足或含有过多nan值，则返回np.nan。
+    """
+    if len(portfolio_return) < 64:
+        return np.nan
+
+    # 清除含有 nan 的数据
+    clean_data = portfolio_return[~np.isnan(portfolio_return)]
+    if len(clean_data) < 64:
+        return np.nan
+
+    average_r_s = np.empty(6, dtype=np.float64)  # 用于存储不同尺度下r/s统计量的平均值
+    size_list = np.empty(6, dtype=np.float64)  # 用于存储不同尺度下的子序列长度
+
+    # 在不同尺度上计算r/s统计量
+    for i in range(6):
+        m = 2 ** i
+        size = len(clean_data) // m
+        size_list[i] = size
+        r_s = np.empty(m, dtype=np.float64)
+
+        for j in range(m):
+            segment = clean_data[j * size:(j + 1) * size]
+            s = np.std(segment)
+            if s == 0:
+                s = 0.00001
+            deviation = segment - np.mean(segment)
+            # 计算每个子序列的r/s统计量
+            r_s[j] = (np.max(deviation) - np.min(deviation)) / s
+
+        average_r_s[i] = np.mean(r_s)  # 计算该尺度下的平均r/s值
+
+    log10_size_list = np.log10(size_list)
+    log10_average_r_s = np.log10(average_r_s)
+    # 手动计算线性回归，以确定hurst指数
+    sxx = np.sum((log10_size_list - np.mean(log10_size_list)) ** 2)
+    if sxx == 0:
+        sxx = 0.00001
+    sxy = np.sum((log10_size_list - np.mean(log10_size_list)) * (log10_average_r_s - np.mean(log10_average_r_s)))
+    slope = sxy / sxx  # 计算线性回归的斜率，即hurst指数
+    return slope
+
+
+@njit(float64[:](float64[:, :]), parallel=True)
+def compute_hurst_for_all_funds(funds_return):
+    """
+    计算所有基金的hurst指数
+
+    参数:
+        funds_return: 一个二维数组，代表所有基金的回报率，其中每一列是一个基金的所有回报率。
+
+    返回值:
+        一个一维数组，包含所有基金的hurst指数。
+    """
+    # 计算二维数组的列数
+    n_cols = funds_return.shape[1]
+    # 预分配一个一维数组，用于存储所有基金的hurst指数
+    the_res = np.empty(n_cols, dtype=np.float64)
+
+    # 并行计算每只基金的hurst指数
+    for j in prange(n_cols):
+        the_res[j] = calculate_hurst_exponent(funds_return[:, j])
+
+    return the_res
+
+
+@njit(float64[:, :](float64[:, :]), parallel=True)
+def compute_k_ratios_combined(return_array):
+    """
+    输入:
+        return_array: ndarray[float64] of shape (n_days, n_funds)
+            每日对数收益率，允许存在 np.nan
+
+    返回:
+        result: ndarray[float64] of shape (n_funds, 2)
+            第0列: 累计收益率的斜率 (slope)
+            第1列: K-Ratio = slope / 标准误差
+    """
+    n_days, n_funds = return_array.shape
+    result = np.full((n_funds, 2), np.nan)
+
+    for i in prange(n_funds):
+        r = return_array[:, i]
+        t = np.empty(n_days, dtype=np.float64)
+        y = np.empty(n_days, dtype=np.float64)
+
+        cum_sum = 0.0
+        idx = 0
+        for j in range(n_days):
+            if not np.isnan(r[j]):
+                cum_sum += r[j]
+                t[idx] = j
+                y[idx] = cum_sum
+                idx += 1
+
+        if idx < 2:
+            continue
+
+        # 计算 slope 和 stderr
+        t_valid = t[:idx]
+        y_valid = y[:idx]
+
+        t_mean = np.mean(t_valid)
+        y_mean = np.mean(y_valid)
+        cov = np.sum((t_valid - t_mean) * (y_valid - y_mean))
+        var = np.sum((t_valid - t_mean) ** 2)
+
+        if var == 0:
+            continue
+
+        slope = cov / var
+        stderr = np.sqrt(np.sum((y_valid - (slope * t_valid + y_mean - slope * t_mean)) ** 2) / (idx - 2)) / np.sqrt(var)
+
+        result[i, 0] = slope
+        result[i, 1] = slope / stderr if stderr != 0 else np.nan
+
+    return result
 
 
 # 金融指标计算器类
@@ -595,9 +728,109 @@ class CalMetrics:
 
         return ratio  # shape=(n_funds,)
 
-    @cache_metric
-    def cal_HurstExponent(self):
-        pass
+    @cache_metric  # 近似 Hurst 指数
+    def cal_HurstExponent(self, **kwargs):
+        return compute_hurst_for_all_funds(self.return_array)
+
+    @cache_metric  # 计算收益分布积分
+    def cal_ReturnDistributionIntegral(self, **kwargs):
+        """
+        计算收益分布积分（Return Distribution Integral，RDI）。
+
+        该函数用于量化基金收益超过最小接受回报（MAR）的部分的期望值。
+        它通过计算所有超过MAR的每日收益与对应概率的乘积之和来实现。
+
+        参数:
+        - kwargs: 允许函数接受任意额外的关键字参数，这里未使用。
+
+        返回:
+        - rdi: 基金的收益分布积分值，表示超过MAR的收益的期望值。
+        """
+
+        # 排除全是 NaN 的基金列
+        mask = ~np.isnan(self.return_array)
+        n_days = np.sum(mask, axis=0)
+
+        # 计算每个样本的概率
+        p = 1.0 / n_days  # shape=(n_funds,)
+
+        # 按行排序
+        sorted_returns = np.sort(self.return_array, axis=0)
+
+        # 构造权重矩阵 p_i（每一列都是常数向量）
+        p_matrix = np.broadcast_to(p, sorted_returns.shape)
+
+        # 选取大于 mar 的部分
+        gain_mask = sorted_returns > log_daily_return
+        gains = (sorted_returns - log_daily_return) * p_matrix
+        gains[~gain_mask] = 0.0
+
+        # 计算 RDI
+        rdi = np.nansum(gains, axis=0)
+        return rdi
+
+    @cache_metric  # 计算Omega比率
+    def cal_OmegaRatio(self, **kwargs):
+        """
+        计算Omega比率。
+
+        Omega比率是通过计算收益超过某个阈值的概率加权平均值（上尾部分）与损失低于该阈值的概率加权平均值（下尾部分）的比值来衡量投资表现的指标。
+        此函数主要用于评估给定收益序列的Omega比率，通过区分收益和损失部分来提供更细致的风险调整后收益分析。
+
+        参数:
+        - **kwargs: 允许函数接受可变关键字参数，但在这个上下文中未直接使用。
+
+        返回:
+        - omega: 计算得到的Omega比率。
+        """
+        # 创建一个掩码，用于排除不是数字的值
+        mask = ~np.isnan(self.return_array)
+        # 计算有效（非NaN）交易日的数量
+        n_days = np.sum(mask, axis=0)
+        # 每个样本的概率，即1除以有效交易日数
+        p = 1.0 / n_days
+        # 为避免除以零错误，引入一个极小值
+        eps = 1e-8
+
+        # 对收益进行排序，以便后续计算上尾和下尾
+        sorted_returns = np.sort(self.return_array, axis=0)
+        # 将概率p扩展成与sorted_returns相同形状的矩阵
+        p_matrix = np.broadcast_to(p, sorted_returns.shape)
+
+        # 计算上尾部分，即超过某个阈值（log_daily_return）的收益
+        gain_mask = sorted_returns > log_daily_return
+        # 对超过阈值的收益进行概率加权
+        gains = (sorted_returns - log_daily_return) * p_matrix
+        # 对不超过阈值的部分设为0，仅保留上尾部分的收益
+        gains[~gain_mask] = 0.0
+        # 计算上尾部分的总和，即收益部分
+        rdi = np.nansum(gains, axis=0)
+
+        # 计算下尾部分，即低于某个阈值（log_daily_return）的损失
+        loss_mask = sorted_returns < log_daily_return
+        # 对低于阈值的损失进行概率加权
+        losses = (log_daily_return - sorted_returns) * p_matrix
+        # 对超过阈值的部分设为0，仅保留下尾部分的损失
+        losses[~loss_mask] = 0.0
+        # 计算下尾部分的总和，即损失部分
+        ldi = np.nansum(losses, axis=0)
+
+        # 计算Omega比率，使用eps避免除以零
+        omega = rdi / (ldi + eps)
+        # 返回计算得到的Omega比率
+        return omega
+
+    @cache_metric   # 计算K比率的综合代码
+    def cal_k_ratio_all(self, metric_name='KRatio', **kwargs):
+        # 计算
+        result = compute_k_ratios_combined(self.return_array)
+        # 提取斜率和 K 比率
+        slope_array = result[:, 0]  # 第一列为累计收益率斜率
+        k_ratio_array = result[:, 1]  # 第二列为 K 比率
+        self.res_dict["ReturnSlope"] = slope_array
+        self.res_dict["KRatio"] = k_ratio_array
+        # 返回指定指标结果
+        return self.res_dict[metric_name]
 
     def cal_metric(self, metric_name, **kwargs):
         """
@@ -613,7 +846,9 @@ class CalMetrics:
         # 最大回撤指标的统一处理
         if metric_name in ['MaxDrawDown', 'MaxDrawDownDays', 'ReturnDrawDownRatio',
                            'AnnReturnDrawDownRatio', 'DrawDownSlope', 'UlcerIndex']:
-            return self.cal_max_draw_down_for_all(metric_name)
+            return self.cal_max_draw_down_for_all(metric_name=metric_name)
+        elif metric_name in ['ReturnSlope', 'KRatio']:
+            return self.cal_k_ratio_all(metric_name=metric_name)
         # VaR 指标的处理
         elif metric_name.startswith('VaR') or metric_name.startswith('CVaR'):
             kwargs["confidence_level"] = float(metric_name.split("-")[1]) / 100
@@ -642,19 +877,21 @@ if __name__ == '__main__':
     the_close_price_array = the_close_price_array.resample('D').asfreq()
     the_log_return_df = the_log_return_df.resample('D').asfreq()
 
-    the_close_price_array = the_close_price_array.values[:, :10]
-    the_log_return_df = the_log_return_df.values[:, :10]
+    the_close_price_array = the_close_price_array.values
+    the_log_return_df = the_log_return_df.values
 
     # 删除所有全为 NaN 的行
     the_close_price_array = the_close_price_array[~np.all(np.isnan(the_close_price_array), axis=1)]
     the_log_return_df = the_log_return_df[~np.all(np.isnan(the_log_return_df), axis=1)]
-    # the_close_price_array[:, 3] = 1
-    # the_log_return_df[:, 3] = -0.001
-    # the_log_return_df[:, 1] = 0.001
+    the_close_price_array = the_close_price_array[:, :10]
+    the_log_return_df = the_log_return_df[:, :10]
 
     c_m = CalMetrics(the_log_return_df, the_close_price_array, 61, 50)
-    res = c_m.cal_metric('CrossProductRatio-1')
+
+    s_t = time.time()
+    res = c_m.cal_metric('ReturnSlope')
     print(res)
-    res = c_m.cal_metric('CrossProductRatio-5')
+    res = c_m.cal_metric('KRatio')
     print(res)
     print(c_m.res_dict)
+    print(time.time() - s_t)
