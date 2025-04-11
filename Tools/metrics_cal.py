@@ -261,16 +261,16 @@ def compute_net_equity_metrics(price_array):
 
 # 金融指标计算器类
 class CalMetrics:
-    def __init__(self, fund_codes, log_return_array, close_price_array, nature_days_in_p, trading_days_in_p, end_date,
+    def __init__(self, fund_codes, log_return_array, close_price_array, time_zone_code, nature_days_in_p, end_date,
                  trans_to_cumulative_return=False):
         self.fund_codes = fund_codes
-        self.return_array = log_return_array
-        self.price_array = close_price_array
+        self.return_array = log_return_array[~np.all(np.isnan(log_return_array), axis=1)]
+        self.price_array = close_price_array[~np.all(np.isnan(close_price_array), axis=1)]
+        self.time_zone_code = time_zone_code
         self.nature_days = nature_days_in_p
-        self.trading_days = trading_days_in_p
         self.cum_rtn = trans_to_cumulative_return
         self.end_date = end_date
-        self.n_days, self.n_funds = log_return_array.shape
+        self.n_days, self.n_funds = self.return_array.shape
         self.res_dict = dict()
 
     @cache_metric  # 累积收益率
@@ -304,7 +304,7 @@ class CalMetrics:
 
     @cache_metric  # 平均盈亏比
     def cal_AvgReturnRatio(self, **kwargs):
-        ratio = self.cal_AvgPositiveReturn / self.cal_AvgNegativeReturn
+        ratio = self.cal_AvgPositiveReturn() / self.cal_AvgNegativeReturn()
         return np.where(np.isnan(ratio), 0, ratio)
 
     @cache_metric  # 总累计盈利 = 所有正收益的总和
@@ -1010,6 +1010,11 @@ class CalMetrics:
         final_df = pd.concat(final_df, axis=0)
         final_df = final_df.pivot(index=["ts_code", "date"], columns="metric_name", values="metric_value").reset_index()
         final_df.columns.name = None
+
+        # 指标代码中加入时间区间
+        columns = final_df.columns.tolist()
+        columns = [col + ':' + self.time_zone_code if col not in ['ts_code', 'date'] else col for col in columns]
+        final_df.columns = columns
         return final_df
 
 
@@ -1024,14 +1029,11 @@ if __name__ == '__main__':
     the_close_price_array = the_close_price_array.values
     the_log_return_df = the_log_return_df.values
 
-    # 删除所有全为 NaN 的行
-    the_close_price_array = the_close_price_array[~np.all(np.isnan(the_close_price_array), axis=1)]
-    the_log_return_df = the_log_return_df[~np.all(np.isnan(the_log_return_df), axis=1)]
     # the_close_price_array = the_close_price_array[:, :3]
     # the_log_return_df = the_log_return_df[:, :3]
 
     c_m = CalMetrics(funds_codes, the_log_return_df, the_close_price_array,
-                     61, 50, pd.to_datetime('2025-04-11'))
+                     '1m', 61, pd.to_datetime('2025-04-11'))
 
     m_list = ['NetEquitySlope', 'EquitySmoothness']
     rr = c_m.cal_metric_main(m_list)

@@ -8,6 +8,7 @@
 import gc
 import numpy as np
 import pandas as pd
+from tqdm import tqdm
 from dateutil.relativedelta import relativedelta
 from Tools.tushare_get_ETF_data import get_etf_info
 from Tools.metrics_cal import CalMetrics
@@ -189,6 +190,7 @@ def compute_metrics_for_period_initialize(log_return_df, close_price_df):
     trading_days_array = pd.to_datetime(np.array(log_return_df.index))
     # 将索引日期扩充到自然日
     log_return_df = log_return_df.resample('D').asfreq()
+    close_price_df = close_price_df.resample('D').asfreq()
     # 获取自然日序列
     nature_days_array = pd.to_datetime(np.array(log_return_df.index))
     # 得到区间与该区间要计算指标的映射
@@ -197,6 +199,8 @@ def compute_metrics_for_period_initialize(log_return_df, close_price_df):
     log_return_array = log_return_df.values
     # 将 close_price_df 转换为 numpy 数组
     close_price_array = close_price_df.values
+    # 得到基金代码
+    funds_codes = log_return_df.columns.values
 
     # 释放内存
     del log_return_df, close_price_df
@@ -204,26 +208,38 @@ def compute_metrics_for_period_initialize(log_return_df, close_price_df):
 
     ''' 2) 遍历各个区间 '''
     for period in ['2w']:
-        # for period in period_list:
-        for end_date in reversed(trading_days_array):
+        print(f"计算区间: {period}")
+        final_df = list()
+        for end_date in tqdm(list(reversed(trading_days_array))):
             # 计算开始日期
             start_date = get_start_date(end_date, period)
             # 如果 区间开始日期不在自然日序列中，则跳出循环 (区间不完整)
             if start_date not in nature_days_array:
-                break
+                continue
+            # print(start_date, end_date)
+
             # 找到 开始日期 & 解释日期在 nature_days_array 的索引位置
             start_idx, end_idx = find_date_range_indices(nature_days_array, start_date, end_date)
 
-            # 截取在区间内的 log_return_array 数据
+            # 截取在区间内的 log_return_array 数据 和 close_price_array 数据
             in_p_log_return_array = log_return_array[start_idx + 1: end_idx + 1]
+            in_p_close_price_array = close_price_array[start_idx + 1: end_idx + 1]
+
             # 计算区间内有多少个自然日
             days_in_p = end_idx - start_idx
 
-            # # # 遍历该区间要计算的指标
-            # # for metric in period_metrics_map[period]:
-            # c_m = CalMetrics(in_p_log_return_array, days_in_p)
-            # sub_res = [c_m.cal_metric(metric_name) for metric_name in period_metrics_map[period]]
-            # print(sub_res)
+            # 遍历计算该区间的指标
+            c_m = CalMetrics(funds_codes,
+                             in_p_log_return_array,
+                             in_p_close_price_array,
+                             period,
+                             days_in_p,
+                             end_date)
+            sub_df = c_m.cal_metric_main(period_metrics_map[period])
+            final_df.append(sub_df)
+        # 将所有区间的指标数据合并
+        final_df = pd.concat(final_df, axis=0)
+        print(final_df)
 
 
 if __name__ == '__main__':
