@@ -147,6 +147,10 @@ class CalMetrics:
     def cal_ReturnRange(self, **kwargs):
         return self.cal_MaxGain() - self.cal_MaxLoss()
 
+    @cache_metric
+    def cal_RescaledRange(self, **kwargs):
+        return self.cal_ReturnRange() / self.cal_Volatility()
+
     @cache_metric  # 最大单日收益
     def cal_MaxGain(self, **kwargs):
         return np.nanmax(self.return_array, axis=0)
@@ -156,7 +160,7 @@ class CalMetrics:
         return np.nanmin(self.return_array, axis=0)
 
     @cache_metric  # 年化波动率
-    def cal_AnnualizedVolatility(self):
+    def cal_AnnualizedVolatility(self, **kwargs):
         return self.cal_Volatility() * np.sqrt(risk_ann_factor)
 
     @cache_metric  # 计算所有最大回撤相关的指标
@@ -590,6 +594,10 @@ class CalMetrics:
         ratio = np.where(denominator == 0, np.nan, numerator / denominator)
 
         return ratio  # shape=(n_funds,)
+
+    @cache_metric
+    def cal_HurstExponent(self):
+        pass
 
     def cal_metric(self, metric_name, **kwargs):
         """
