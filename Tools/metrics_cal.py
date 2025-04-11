@@ -261,13 +261,15 @@ def compute_net_equity_metrics(price_array):
 
 # 金融指标计算器类
 class CalMetrics:
-    def __init__(self, log_return_array, close_price_array, nature_days_in_p, trading_days_in_p,
+    def __init__(self, fund_codes, log_return_array, close_price_array, nature_days_in_p, trading_days_in_p, end_date,
                  trans_to_cumulative_return=False):
+        self.fund_codes = fund_codes
         self.return_array = log_return_array
         self.price_array = close_price_array
         self.nature_days = nature_days_in_p
         self.trading_days = trading_days_in_p
         self.cum_rtn = trans_to_cumulative_return
+        self.end_date = end_date
         self.n_days, self.n_funds = log_return_array.shape
         self.res_dict = dict()
 
@@ -326,6 +328,10 @@ class CalMetrics:
     def cal_Volatility(self, **kwargs):
         return np.nanstd(self.return_array, axis=0, ddof=1)
 
+    @cache_metric  # 年化波动率
+    def cal_AnnualizedVolatility(self, **kwargs):
+        return self.cal_Volatility() * np.sqrt(risk_ann_factor)
+
     @cache_metric  # 收益率范围
     def cal_ReturnRange(self, **kwargs):
         return self.cal_MaxGain() - self.cal_MaxLoss()
@@ -341,10 +347,6 @@ class CalMetrics:
     @cache_metric  # 最大单日亏损
     def cal_MaxLoss(self, **kwargs):
         return np.nanmin(self.return_array, axis=0)
-
-    @cache_metric  # 年化波动率
-    def cal_AnnualizedVolatility(self, **kwargs):
-        return self.cal_Volatility() * np.sqrt(risk_ann_factor)
 
     @cache_metric  # 计算所有最大回撤相关的指标
     def cal_max_draw_down_for_all(self, metric_name: str, **kwargs) -> float:
@@ -948,6 +950,7 @@ class CalMetrics:
         # 返回指定的指标结果
         return self.res_dict[metric_name]
 
+    # 根据指标名 计算相应的指标值
     def cal_metric(self, metric_name, **kwargs):
         """
         根据指标名 计算相应的指标值。
@@ -989,6 +992,26 @@ class CalMetrics:
             print(f"Error when calling '{method_name}': {e}")
             print(traceback.format_exc())
 
+    # 根据指标名列表 计算相应的指标值
+    def cal_metric_main(self, metric_name_list, **kwargs):
+        # 计算各个指标值
+        final_df = list()
+        for metric_name in metric_name_list:
+            final_df.append(pd.DataFrame({
+                "ts_code": self.fund_codes,
+                "metric_value": self.cal_metric(metric_name, **kwargs),
+                "metric_name": metric_name,
+                "date": self.end_date
+            }))
+        if len(final_df) == 0:
+            raise ValueError("没有计算出任何指标")
+
+        # 整理指标结果并返回
+        final_df = pd.concat(final_df, axis=0)
+        final_df = final_df.pivot(index=["ts_code", "date"], columns="metric_name", values="metric_value").reset_index()
+        final_df.columns.name = None
+        return final_df
+
 
 if __name__ == '__main__':
     the_close_price_array = pd.read_parquet('close_df.parquet')
@@ -996,6 +1019,7 @@ if __name__ == '__main__':
 
     the_close_price_array = the_close_price_array.resample('D').asfreq()
     the_log_return_df = the_log_return_df.resample('D').asfreq()
+    funds_codes = the_log_return_df.columns.values
 
     the_close_price_array = the_close_price_array.values
     the_log_return_df = the_log_return_df.values
@@ -1003,15 +1027,12 @@ if __name__ == '__main__':
     # 删除所有全为 NaN 的行
     the_close_price_array = the_close_price_array[~np.all(np.isnan(the_close_price_array), axis=1)]
     the_log_return_df = the_log_return_df[~np.all(np.isnan(the_log_return_df), axis=1)]
-    the_close_price_array = the_close_price_array[:, :10]
-    the_log_return_df = the_log_return_df[:, :10]
+    # the_close_price_array = the_close_price_array[:, :3]
+    # the_log_return_df = the_log_return_df[:, :3]
 
-    c_m = CalMetrics(the_log_return_df, the_close_price_array, 61, 50)
+    c_m = CalMetrics(funds_codes, the_log_return_df, the_close_price_array,
+                     61, 50, pd.to_datetime('2025-04-11'))
 
-    s_t = time.time()
-    res = c_m.cal_metric('NetEquitySlope')
-    print(res)
-    res = c_m.cal_metric('EquitySmoothness')
-    print(res)
-    print(c_m.res_dict)
-    print(time.time() - s_t)
+    m_list = ['NetEquitySlope', 'EquitySmoothness']
+    rr = c_m.cal_metric_main(m_list)
+    print(rr)

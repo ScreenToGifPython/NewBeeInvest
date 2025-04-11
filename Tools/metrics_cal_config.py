@@ -101,6 +101,11 @@ log_return_metrics_dict = {
          '波动率 = 收益率的标准差',
          ['1w', '2w', '1m', '2m', '3m', '5m', '6m', '12m', '2y', '3y', '5y', 'mtd', 'qtd', 'ytd'],
          ],
+    'AnnualizedVolatility':
+        ['年化波动率',
+         '年化波动率 = 波动率 * sqrt(risk_ann_factor)',
+         ['1w', '2w', '1m', '2m', '3m', '5m', '6m', '12m', '2y', '3y', '5y', 'mtd', 'qtd', 'ytd'],
+         ],
     'MeanAbsoluteDeviation':
         ['平均绝对偏差',
          '平均绝对偏差 = 平均每期收益率距离均值的绝对值, 比标准差更不受极端值影响',
@@ -125,11 +130,6 @@ log_return_metrics_dict = {
         ['最大单日亏损',
          '最大亏损 = 收益率的最小值',
          ['3d', '1w', '2w', '1m', '2m', '3m', '5m', '6m', '12m', '2y', '3y', '5y', 'mtd', 'qtd', 'ytd'],
-         ],
-    'AnnualizedVolatility':
-        ['年化波动率',
-         '年化波动率 = 波动率 * sqrt(risk_ann_factor)',
-         ['1w', '2w', '1m', '2m', '3m', '5m', '6m', '12m', '2y', '3y', '5y', 'mtd', 'qtd', 'ytd'],
          ],
     'MaxDrawDown':  # 最大回撤用的是普通回撤率,而非对数回撤率
         ['最大回撤',

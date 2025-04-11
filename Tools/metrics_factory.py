@@ -177,75 +177,89 @@ def find_date_range_indices(nature_days_array, start_date, end_date):
 
 
 # 遍历要计算的区间
-def compute_metrics_for_period_initialize(log_return_df):
+def compute_metrics_for_period_initialize(log_return_df, close_price_df):
+    """
+
+    :param log_return_df:
+    :param close_price_df:
+    :return:
+    """
+    ''' 1) 数据预处理 '''
     # 获取交易日序列
     trading_days_array = pd.to_datetime(np.array(log_return_df.index))
     # 将索引日期扩充到自然日
     log_return_df = log_return_df.resample('D').asfreq()
     # 获取自然日序列
     nature_days_array = pd.to_datetime(np.array(log_return_df.index))
-    # 将 log_return_df 转换为 numpy 数组
-    log_return_array = log_return_df.values
     # 得到区间与该区间要计算指标的映射
     period_metrics_map = create_period_metrics_map()
+    # 将 log_return_df 转换为 numpy 数组
+    log_return_array = log_return_df.values
+    # 将 close_price_df 转换为 numpy 数组
+    close_price_array = close_price_df.values
+
     # 释放内存
-    del log_return_df
+    del log_return_df, close_price_df
     gc.collect()
 
-    for period in ['2d']:
-    # for period in period_list:
+    ''' 2) 遍历各个区间 '''
+    for period in ['2w']:
+        # for period in period_list:
         for end_date in reversed(trading_days_array):
             # 计算开始日期
             start_date = get_start_date(end_date, period)
+            # 如果 区间开始日期不在自然日序列中，则跳出循环 (区间不完整)
+            if start_date not in nature_days_array:
+                break
             # 找到 开始日期 & 解释日期在 nature_days_array 的索引位置
             start_idx, end_idx = find_date_range_indices(nature_days_array, start_date, end_date)
-            # 如果 start_idx + 1 >= end_idx，表示 start_date + 1 超出或无数据，跳出循环
-            if start_idx + 1 > end_idx:
-                break
+
             # 截取在区间内的 log_return_array 数据
             in_p_log_return_array = log_return_array[start_idx + 1: end_idx + 1]
             # 计算区间内有多少个自然日
             days_in_p = end_idx - start_idx
 
-            # # 遍历该区间要计算的指标
-            # for metric in period_metrics_map[period]:
-            c_m = CalMetrics(in_p_log_return_array, days_in_p)
-            sub_res = [c_m.cal_metric(metric_name) for metric_name in period_metrics_map[period]]
-            print(sub_res)
+            # # # 遍历该区间要计算的指标
+            # # for metric in period_metrics_map[period]:
+            # c_m = CalMetrics(in_p_log_return_array, days_in_p)
+            # sub_res = [c_m.cal_metric(metric_name) for metric_name in period_metrics_map[period]]
+            # print(sub_res)
 
 
 if __name__ == '__main__':
-    (open_df,  # 包含ETF基金的开盘价数据的数据框，行索引为日期，列索引为基金代码
-     high_df,  # 包含ETF基金的最高价数据的数据框，行索引为日期，列索引为基金代码
-     low_df,  # 包含ETF基金的最低价数据的数据框，行索引为日期，列索引为基金代码
-     close_df,  # 包含ETF基金的收盘价数据的数据框，行索引为日期，列索引为基金代码
-     change_df,  # 包含ETF基金的价格变动数据的数据框，行索引为日期，列索引为基金代码
-     pct_chg_df,  # 包含ETF基金的价格百分比变动数据的数据框，行索引为日期，列索引为基金代码
-     vol_df,  # 包含ETF基金的交易量数据的数据框，行索引为日期，列索引为基金代码
-     amount_df,  # 包含ETF基金的交易金额数据的数据框，行索引为日期，列索引为基金代码
-     log_return_df,  # 包含ETF基金的对数收益率数据的数据框，行索引为日期，列索引为基金代码
-     etf_info_df  # 包含ETF基金的基本信息的数据框，如基金代码、基金名称、投资类型等
-     ) = data_prepare()
-
-    close_df.to_parquet('close_df.parquet')
+    # (open_df,  # 包含ETF基金的开盘价数据的数据框，行索引为日期，列索引为基金代码
+    #  high_df,  # 包含ETF基金的最高价数据的数据框，行索引为日期，列索引为基金代码
+    #  low_df,  # 包含ETF基金的最低价数据的数据框，行索引为日期，列索引为基金代码
+    #  close_df,  # 包含ETF基金的收盘价数据的数据框，行索引为日期，列索引为基金代码
+    #  change_df,  # 包含ETF基金的价格变动数据的数据框，行索引为日期，列索引为基金代码
+    #  pct_chg_df,  # 包含ETF基金的价格百分比变动数据的数据框，行索引为日期，列索引为基金代码
+    #  vol_df,  # 包含ETF基金的交易量数据的数据框，行索引为日期，列索引为基金代码
+    #  amount_df,  # 包含ETF基金的交易金额数据的数据框，行索引为日期，列索引为基金代码
+    #  log_return_df,  # 包含ETF基金的对数收益率数据的数据框，行索引为日期，列索引为基金代码
+    #  etf_info_df  # 包含ETF基金的基本信息的数据框，如基金代码、基金名称、投资类型等
+    #  ) = data_prepare()
+    #
+    # close_df.to_parquet('close_df.parquet')
     the_close_df = pd.read_parquet('close_df.parquet')
 
-    log_return_df.to_parquet('log_return_df.parquet')
+    # log_return_df.to_parquet('log_return_df.parquet')
     the_log_return_df = pd.read_parquet('log_return_df.parquet')
 
-# # 获取交易日序列
-# trading_days = np.array(open_df.index)
-#
-# # 将索引日期扩充到自然日
-# open_df = open_df.resample('D').asfreq()
-# high_df = high_df.resample('D').asfreq()
-# low_df = low_df.resample('D').asfreq()
-# close_df = close_df.resample('D').asfreq()
-# change_df = change_df.resample('D').asfreq()
-# pct_chg_df = pct_chg_df.resample('D').asfreq()
-# vol_df = vol_df.resample('D').asfreq()
-# amount_df = amount_df.resample('D').asfreq()
-# log_return_df = log_return_df.resample('D').asfreq()
-#
-# # 获取自然日序列
-# nature_days = np.array(open_df.index)
+    compute_metrics_for_period_initialize(the_log_return_df, the_close_df)
+
+    # # 获取交易日序列
+    # trading_days = np.array(open_df.index)
+    #
+    # # 将索引日期扩充到自然日
+    # open_df = open_df.resample('D').asfreq()
+    # high_df = high_df.resample('D').asfreq()
+    # low_df = low_df.resample('D').asfreq()
+    # close_df = close_df.resample('D').asfreq()
+    # change_df = change_df.resample('D').asfreq()
+    # pct_chg_df = pct_chg_df.resample('D').asfreq()
+    # vol_df = vol_df.resample('D').asfreq()
+    # amount_df = amount_df.resample('D').asfreq()
+    # log_return_df = log_return_df.resample('D').asfreq()
+    #
+    # # 获取自然日序列
+    # nature_days = np.array(open_df.index)
