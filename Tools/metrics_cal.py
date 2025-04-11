@@ -201,10 +201,60 @@ def compute_k_ratios_combined(return_array):
             continue
 
         slope = cov / var
-        stderr = np.sqrt(np.sum((y_valid - (slope * t_valid + y_mean - slope * t_mean)) ** 2) / (idx - 2)) / np.sqrt(var)
+        stderr = np.sqrt(np.sum((y_valid - (slope * t_valid + y_mean - slope * t_mean)) ** 2)
+                         / (idx - 2)) / np.sqrt(var)
 
         result[i, 0] = slope
         result[i, 1] = slope / stderr if stderr != 0 else np.nan
+
+    return result
+
+
+@njit(float64[:, :](float64[:, :]), parallel=True)
+def compute_net_equity_metrics(price_array):
+    n_days, n_funds = price_array.shape
+    result = np.full((n_funds, 2), np.nan, dtype=np.float64)  # [slope, r_squared]
+
+    for i in prange(n_funds):
+        y = price_array[:, i]
+        valid_count = 0
+        for j in range(n_days):
+            if not np.isnan(y[j]):
+                valid_count += 1
+
+        if valid_count < 2:
+            continue
+
+        # 拿到有效点的索引和值
+        t_valid = np.empty(valid_count, dtype=np.float64)
+        y_valid = np.empty(valid_count, dtype=np.float64)
+
+        idx = 0
+        for j in range(n_days):
+            if not np.isnan(y[j]):
+                t_valid[idx] = j
+                y_valid[idx] = np.log(y[j])  # log 净值
+                idx += 1
+
+        # 手动计算斜率
+        t_mean = np.mean(t_valid)
+        y_mean = np.mean(y_valid)
+
+        t_centered = t_valid - t_mean
+        y_centered = y_valid - y_mean
+
+        numerator = np.sum(t_centered * y_centered)
+        denominator = np.sum(t_centered ** 2)
+
+        if denominator != 0:
+            slope = numerator / denominator
+            y_pred = slope * t_centered + y_mean
+            ss_res = np.sum((y_valid - y_pred) ** 2)
+            ss_tot = np.sum(y_centered ** 2)
+
+            r_squared = 1 - ss_res / ss_tot if ss_tot != 0 else np.nan
+            result[i, 0] = slope
+            result[i, 1] = r_squared
 
     return result
 
@@ -351,7 +401,10 @@ class CalMetrics:
         mean_dd_sq = np.mean(draw_down ** 2, axis=0)
         self.res_dict["UlcerIndex"] = np.sqrt(mean_dd_sq)
 
-        ''' (7) 返回指定指标结果 '''
+        ''' (7) 计算马丁比率, 年化收益率 / 溃疡指数 '''
+        self.res_dict["MartinRatio"] = self.cal_AnnualizedReturn() / self.res_dict["UlcerIndex"]
+
+        ''' (8) 返回指定指标结果 '''
         return self.res_dict[metric_name]
 
     @cache_metric  # 年化夏普比率
@@ -370,7 +423,7 @@ class CalMetrics:
         return np.where(np.isnan(ratio), 0, ratio)
 
     @cache_metric  # 下行波动率
-    def cal_DownsideVolatility(self, mar=0, **kwargs):
+    def cal_DownsideVolatility(self, mar=log_daily_return, **kwargs):
         # 计算低于 MAR 的差值，否则为 0
         down_diff = np.where(self.return_array < mar, self.return_array - mar, 0.0)
         # 计算方差（1个自由度）
@@ -820,7 +873,7 @@ class CalMetrics:
         # 返回计算得到的Omega比率
         return omega
 
-    @cache_metric   # 计算K比率的综合代码
+    @cache_metric  # 计算K比率的综合代码
     def cal_k_ratio_all(self, metric_name='KRatio', **kwargs):
         # 计算
         result = compute_k_ratios_combined(self.return_array)
@@ -830,6 +883,69 @@ class CalMetrics:
         self.res_dict["ReturnSlope"] = slope_array
         self.res_dict["KRatio"] = k_ratio_array
         # 返回指定指标结果
+        return self.res_dict[metric_name]
+
+    @cache_metric  # 索提诺偏度
+    def cal_SortinoSkewness(self, mar=log_daily_return, **kwargs):
+        """
+        计算索提诺偏度（Sortino Skewness）。
+
+        索提诺偏度是衡量投资组合收益分布的不对称性指标，专注于负收益（下行风险）。
+
+        参数:
+        - mar: 最低可接受回报率，默认为日对数收益率。
+        - **kwargs: 其他关键字参数。
+
+        返回:
+        - skewness: 索提诺偏度数组，每个基金对应一个偏度值。
+        """
+        # 识别低于最低可接受回报率（mar）的收益
+        downside_mask = self.return_array < mar
+
+        # 对负收益部分计算均值（忽略 NaN）
+        downside = np.where(downside_mask, self.return_array, np.nan)  # 非负收益部分置为 NaN
+
+        mean_down = np.nanmean(downside, axis=0)  # shape=(n_funds,)
+        std_down = self.cal_DownsideVolatility(mar=mar)
+
+        # 三阶中心矩 numerator: mean((x - mean)^3)
+        num = np.nanmean((downside - mean_down[np.newaxis, :]) ** 3, axis=0)
+
+        # denominator: std^3，避免除以0
+        denom = std_down ** 3
+        denom[denom == 0] = np.nan  # 避免除0警告
+
+        # 计算索提诺偏度
+        skewness = num / denom
+        return skewness
+
+    @cache_metric  # 净值增长斜率
+    def cal_nv_slope_all(self, metric_name='NetEquitySlope', **kwargs):
+        """
+        计算并返回净值曲线的斜率和光滑度指标。
+
+        该方法通过调用compute_net_equity_metrics函数来计算给定价格数组的净值曲线斜率（NetEquitySlope）
+        和净值曲线光滑度（EquitySmoothness），并将这些结果存储在结果字典（res_dict）中。
+
+        参数:
+        - metric_name (str): 指定返回的指标名称，默认为'NetEquitySlope'。
+        - **kwargs: 允许传递任意额外的关键字参数，这里未使用。
+
+        返回:
+        - 返回指定名称的指标结果，类型为列表或数组。
+        """
+        # 计算净值曲线的斜率和光滑度
+        result = compute_net_equity_metrics(self.price_array)
+
+        # 提取净值曲线斜率和光滑度
+        net_equity_slope = result[:, 0]
+        equity_smoothness = result[:, 1]
+
+        # 将计算结果存储到结果字典中
+        self.res_dict["NetEquitySlope"] = net_equity_slope
+        self.res_dict["EquitySmoothness"] = equity_smoothness
+
+        # 返回指定的指标结果
         return self.res_dict[metric_name]
 
     def cal_metric(self, metric_name, **kwargs):
@@ -844,11 +960,15 @@ class CalMetrics:
         """
 
         # 最大回撤指标的统一处理
-        if metric_name in ['MaxDrawDown', 'MaxDrawDownDays', 'ReturnDrawDownRatio',
+        if metric_name in ['MaxDrawDown', 'MaxDrawDownDays', 'ReturnDrawDownRatio', 'MartinRatio',
                            'AnnReturnDrawDownRatio', 'DrawDownSlope', 'UlcerIndex']:
             return self.cal_max_draw_down_for_all(metric_name=metric_name)
+        # 收益率斜率和 K 比率的统一处理
         elif metric_name in ['ReturnSlope', 'KRatio']:
             return self.cal_k_ratio_all(metric_name=metric_name)
+        # 净值曲线的斜率和光滑度指标的统一处理
+        elif metric_name in ['NetEquitySlope', 'EquitySmoothness']:
+            return self.cal_nv_slope_all(metric_name=metric_name)
         # VaR 指标的处理
         elif metric_name.startswith('VaR') or metric_name.startswith('CVaR'):
             kwargs["confidence_level"] = float(metric_name.split("-")[1]) / 100
@@ -889,9 +1009,9 @@ if __name__ == '__main__':
     c_m = CalMetrics(the_log_return_df, the_close_price_array, 61, 50)
 
     s_t = time.time()
-    res = c_m.cal_metric('ReturnSlope')
+    res = c_m.cal_metric('NetEquitySlope')
     print(res)
-    res = c_m.cal_metric('KRatio')
+    res = c_m.cal_metric('EquitySmoothness')
     print(res)
     print(c_m.res_dict)
     print(time.time() - s_t)
