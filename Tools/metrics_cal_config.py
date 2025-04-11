@@ -396,10 +396,20 @@ log_return_metrics_dict = {
          '净值新高比率 = 净值创新高的交易日数 / 总交易日数',
          ['2w', '1m', '2m', '3m', '5m', '6m', '12m', '2y', '3y', '5y', 'mtd', 'qtd', 'ytd'],
          ],
-    'CrossProductRatio':
-        ['交叉乘积比率',
+    'CrossProductRatio-1':
+        ['交叉乘积比率 (基于单日收益统计)',
          '交叉乘积比率 = (WW * LL) / (WL * LW)',
          ['1m', '2m', '3m', '5m', '6m', '12m', '2y', '3y', '5y', 'mtd', 'qtd', 'ytd'],
+         ],
+    'CrossProductRatio-5':
+        ['交叉乘积比率 (基于5日收益统计)',
+         '交叉乘积比率 = (WW * LL) / (WL * LW)',
+         ['2m', '3m', '5m', '6m', '12m', '2y', '3y', '5y', 'mtd', 'qtd', 'ytd'],
+         ],
+    'CrossProductRatio-10':
+        ['交叉乘积比率 (基于10日收益统计)',
+         '交叉乘积比率 = (WW * LL) / (WL * LW)',
+         ['3m', '5m', '6m', '12m', '2y', '3y', '5y', 'mtd', 'qtd', 'ytd'],
          ],
     'HurstExponent':
         ['赫斯特指数',

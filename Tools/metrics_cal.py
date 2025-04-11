@@ -63,6 +63,9 @@ def cache_metric(func):
         # 分位数指标特殊处理
         elif metric_name.startswith('Percentile') or metric_name.startswith('TailRatio'):
             metric_name = metric_name + '-' + str(int(kwargs["tile"]))
+        # 交叉乘积比率指标特殊处理
+        elif metric_name.startswith('CrossProductRatio'):
+            metric_name = metric_name + '-' + str(int(kwargs["days"]))
 
         # 调用被装饰函数计算结果，并将结果缓存到 `self.res_dict` 中
         result = func(self, *args, **kwargs)
@@ -435,7 +438,7 @@ class CalMetrics:
         # 任何正值或 nan 都设为0
         return np.where(np.isnan(perc_tile), 0.0, perc_tile)
 
-    @cache_metric
+    @cache_metric  # 尾部比率, 极端正收益与极端负收益的比值
     def cal_TailRatio(self, tile=95, **kwargs):
         win_name = 'PercentileWin' + '-' + str(int(tile))
         loss_name = 'PercentileLoss' + '-' + str(int(tile))
@@ -449,7 +452,145 @@ class CalMetrics:
 
         return win / safe_loss
 
-    # 调用不同指标计算的函数
+    @cache_metric  # 净值新高率 (净值创新高的天数 / 总非空天数)
+    def cal_NewHighRatio(self, **kwargs):
+        # 记录历史最大值（每列基金的滚动最高收盘价）
+        rolling_max = np.maximum.accumulate(np.where(np.isnan(self.price_array), -np.inf, self.price_array), axis=0)
+
+        # 是否创新高：当天价格 > 前一天的 rolling max（需移动一位）
+        shifted_max = np.vstack([np.full((1, self.price_array.shape[1]), -np.inf), rolling_max[:-1]])
+        is_new_high = (self.price_array > shifted_max) & (~np.isnan(self.price_array))
+
+        # 统计创新高天数
+        new_high_counts = np.sum(is_new_high, axis=0)
+
+        # 总有效天数
+        valid_counts = np.sum(~np.isnan(self.price_array), axis=0)
+
+        # 新高率
+        return new_high_counts / np.maximum(valid_counts, 1)
+
+    # 工具函数: 计算 n 日收益率之和
+    def tool_sum_return(self, n=2, **kwargs):
+        """
+        计算给定数组在不同时间段内的收益总和。
+
+        该函数根据指定的时期数n，将return_array数组截断并分组，然后计算每个分组内的收益总和。
+        如果一组内的所有值都是NaN，则该组的结果也为NaN。
+
+        参数:
+        - n: 指定每个时间段包含的天数，默认为2。
+        - **kwargs: 允许接受任意额外的关键字参数，但在这个函数中不使用。
+
+        返回:
+        - summed: 一个二维数组，包含每个时间段的收益总和。
+        """
+        # 将n转换为整数类型
+        n = int(n)
+        # 获取原始数组
+        arr = self.return_array
+        # 获取数组的形状，n_days为天数，n_funds为基金数
+        n_days, n_funds = arr.shape
+        # 计算可以被n整除的部分的长度，去除尾部无法整除的部分
+        usable_len = int((n_days // n) * n)
+        # 截取可用部分的数组
+        arr_trimmed = arr[:usable_len]
+        # 将截取后的数组重塑为新的形状，以便后续处理
+        arr_grouped = arr_trimmed.reshape(-1, n, n_funds)
+        # 计算每组中是否所有元素都是NaN
+        all_nan_mask = np.all(np.isnan(arr_grouped), axis=1)
+        # 计算每组中非NaN元素的总和
+        summed = np.nansum(arr_grouped, axis=1)
+        # 将所有元素都是NaN的组的结果设置为NaN
+        summed[all_nan_mask] = np.nan
+        # 返回计算结果
+        return summed
+
+    @cache_metric  # 交叉乘积比率 = (WW * LL) / (WL * LW)
+    def cal_CrossProductRatio(self, days=1, **kwargs):
+        """
+        计算交叉乘积比率（Cross Product Ratio）。
+
+        参数:
+        - days: int, 计算回报率所用的天数。默认为1天。
+        - **kwargs: 允许接受的额外的关键字参数。
+
+        返回:
+        - ratio: numpy.ndarray, 形状为(n_funds,), 表示每个基金的交叉乘积比率。
+                 若分母为0，则返回np.nan。
+        """
+        # 选择使用每日回报还是多日累积回报
+        if days == 1:
+            ra = self.return_array  # shape: (n_days, n_funds)
+        else:
+            ra = self.tool_sum_return(n=days)
+        n_days, n_funds = ra.shape
+
+        # ------------------------------------------------
+        # 1) 将各列的非 NaN 数据前移, NaN 后置
+        # ------------------------------------------------
+        # row_indices: 若是 NaN => n_days, 否则 => 本来的行号
+        # 用于对每列做排序, 把所有 NaN (行号= n_days) 排到末尾
+        row_indices = np.where(
+            np.isnan(ra),
+            n_days,  # 给 NaN 一个很大的行索引 => 排到最后
+            np.arange(n_days)[:, None]  # 各行的真实索引
+        )  # shape=(n_days, n_funds)
+
+        # 对列方向做 argsort, 得到 "把哪几行排在前面"
+        sorted_indices = np.argsort(row_indices, axis=0)  # shape=(n_days, n_funds)
+
+        # 利用花式索引, 每列都按 sorted_indices 的顺序取数据
+        # => new_ra: 每列上方全是非 NaN, 下方是 NaN
+        new_return_array = ra[sorted_indices, np.arange(n_funds)]  # shape=(n_days, n_funds)
+
+        # ------------------------------------------------
+        # 2) 计算 W/L 标记, 并统计 WW/WL/LW/LL 次数(矢量化)
+        # ------------------------------------------------
+        # 定义 sign 矩阵: True表示W(>=0), False表示L(<0).
+        # 对 NaN 元素, (NaN >= 0) => False, 但我们会用 mask 排除
+        sign_mat = (new_return_array >= 0)
+
+        # 再定义有效性 mask: 是否非 NaN
+        valid_mask = ~np.isnan(new_return_array)
+
+        # "昨日"与"今天"的组合 => 我们只比较相邻日 (行 i-1, i)
+        yest_sign = sign_mat[:-1, :]  # => yest_sign = sign_mat[:-1, :], day_sign = sign_mat[1:, :]
+        day_sign = sign_mat[1:, :]  # => valid_2day = valid_mask[:-1, :] & valid_mask[1:, :]
+        valid_2day = valid_mask[:-1, :] & valid_mask[1:, :]  # 结果形状= (n_days-1, n_funds)
+
+        # 组合编码 pair_code: 2*yest_sign + day_sign => {0,1,2,3}, 含义: 0=LL, 1=LW, 2=WL, 3=WW
+        pair_code = 2 * yest_sign.astype(int) + day_sign.astype(int)  # shape=(n_days-1, n_funds)
+
+        # 准备列索引
+        col_index = np.arange(n_funds).reshape(1, -1)  # shape=(1, n_funds)
+        col_index = np.broadcast_to(col_index, (n_days - 1, n_funds))  # shape=(n_days-1, n_funds)
+
+        # 把 pair_code 和 col_index 扁平化, 并用 valid_2day 过滤
+        valid_flat = valid_2day.ravel()  # 布尔数组
+        code_flat = pair_code.ravel()[valid_flat]
+        col_flat = col_index.ravel()[valid_flat]
+
+        # 编成一个“单一数字” comb = code + 4*col => 对每列统计 code in {0,1,2,3}
+        comb = code_flat + 4 * col_flat
+
+        # bincount => hist长度 >= 4*n_funds
+        hist = np.bincount(comb, minlength=4 * n_funds)
+        hist_2d = hist.reshape(n_funds, 4)  # shape=(n_funds,4)
+
+        # hist2D[col, 0]=LL, [1]=LW, [2]=WL, [3]=WW
+        ll = hist_2d[:, 0]
+        lw = hist_2d[:, 1]
+        wl = hist_2d[:, 2]
+        ww = hist_2d[:, 3]
+
+        # 计算 ratio = (WW*LL)/(WL*LW), 若 WL*LW==0 => np.nan
+        numerator = ww * ll
+        denominator = wl * lw
+        ratio = np.where(denominator == 0, np.nan, numerator / denominator)
+
+        return ratio  # shape=(n_funds,)
+
     def cal_metric(self, metric_name, **kwargs):
         """
         根据指标名 计算相应的指标值。
@@ -472,6 +613,10 @@ class CalMetrics:
         # 分位数指标的处理
         elif metric_name.startswith('Percentile') or metric_name.startswith('TailRatio'):
             kwargs["tile"] = float(metric_name.split("-")[1])
+            metric_name = metric_name.split("-")[0]
+        # 交叉积比率相关的处理
+        elif metric_name.startswith('CrossProductRatio'):
+            kwargs["days"] = float(metric_name.split("-")[1])
             metric_name = metric_name.split("-")[0]
 
         method_name = f'cal_{metric_name}'
@@ -500,8 +645,8 @@ if __name__ == '__main__':
     # the_log_return_df[:, 1] = 0.001
 
     c_m = CalMetrics(the_log_return_df, the_close_price_array, 61, 50)
-    res = c_m.cal_metric('TailRatio-90')
+    res = c_m.cal_metric('CrossProductRatio-1')
     print(res)
-    res = c_m.cal_metric('TailRatio-95')
+    res = c_m.cal_metric('CrossProductRatio-5')
     print(res)
     print(c_m.res_dict)
