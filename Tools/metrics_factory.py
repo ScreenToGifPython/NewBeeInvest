@@ -238,8 +238,7 @@ def compute_metrics_for_period_initialize(log_return_df, close_price_df, num_wor
     gc.collect()
 
     ''' 2) 遍历各个区间 '''
-    # for period in period_list:
-    for period in ['1w']:
+    for period in period_list:
         print(f"计算区间: {period}")
 
         ''' 3.1) 遍历每一天的结束日期,滚动计算每天的指标 (进程池) '''
