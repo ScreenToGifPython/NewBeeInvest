@@ -204,11 +204,13 @@ def create_shared_memory(arr: np.ndarray, name: str):
 
 
 # 遍历要计算的区间
-def compute_metrics_for_period_initialize(log_return_df, close_price_df, num_workers=None, multi_process=True):
+def compute_metrics_for_period_initialize(log_return_df, close_price_df,
+                                          p_list=None, num_workers=None, multi_process=True):
     """
 
     :param log_return_df:
     :param close_price_df:
+    :param p_list:
     :param num_workers:
     :param multi_process:
     :return:
@@ -238,8 +240,10 @@ def compute_metrics_for_period_initialize(log_return_df, close_price_df, num_wor
     gc.collect()
 
     ''' 2) 遍历各个区间 '''
-    for period in period_list:
+    for period in p_list if period_list else period_list:
         print(f"计算区间: {period}")
+        if period not in period_metrics_map:
+            continue
 
         ''' 3.1) 遍历每一天的结束日期,滚动计算每天的指标 (进程池) '''
         if multi_process:
@@ -311,7 +315,9 @@ def compute_metrics_for_period_initialize(log_return_df, close_price_df, num_wor
                                  in_p_close_price_array,
                                  period,
                                  days_in_p,
-                                 end_date, 5)
+                                 end_date,
+                                 5
+                                 )
                 sub_df = c_m.cal_metric_main(period_metrics_map[period])
                 final_df.append(sub_df)
 
@@ -339,7 +345,9 @@ if __name__ == '__main__':
     # log_return_df.to_parquet('log_return_df.parquet')
     the_log_return_df = pd.read_parquet('log_return_df.parquet')
 
-    compute_metrics_for_period_initialize(the_log_return_df, the_close_df, multi_process=True)
+    compute_metrics_for_period_initialize(the_log_return_df, the_close_df,
+                                          p_list=['mtd', 'qtd', 'ytd'],
+                                          multi_process=True)
 
     # # 获取交易日序列
     # trading_days = np.array(open_df.index)

@@ -301,7 +301,7 @@ class CalMetrics:
         # 存储结束日期
         self.end_date = end_date
         # 最少需要的数据量
-        self.min_data_required = min_data_required,
+        self.min_data_required = min_data_required
         # 计算并存储返回数组的行数和列数，分别代表天数和基金数量
         self.n_days, self.n_funds = self.return_array.shape
         # 初始化结果字典，用于存储后续计算的业绩评估指标
@@ -752,6 +752,10 @@ class CalMetrics:
             ra = self.tool_sum_return(n=days)
         n_days, n_funds = ra.shape
 
+        # 检查数据是否足够
+        if n_days < self.min_data_required:
+            return np.nan * np.ones(n_funds)
+
         # ------------------------------------------------
         # 1) 将各列的非 NaN 数据前移, NaN 后置
         # ------------------------------------------------
@@ -1028,11 +1032,20 @@ class CalMetrics:
 
     # 根据指标名列表 计算相应的指标值
     def cal_metric_main(self, metric_name_list, **kwargs):
+        # 检查数据是否足够
+        if self.n_days < self.min_data_required:
+            return pd.DataFrame()
+
         # 计算各个指标值
         final_df = list()
         for metric_name in metric_name_list:
             valid_counts = np.sum(~np.isnan(self.return_array), axis=0)
-            res_array = self.cal_metric(metric_name, **kwargs).astype(float)
+            res_array = self.cal_metric(metric_name, **kwargs)
+            # 如果没有计算出任何指标值，则跳过
+            if res_array is None:
+                continue
+            else:
+                res_array = res_array.astype(float)
             res_array[valid_counts < self.min_data_required] = np.nan
 
             final_df.append(pd.DataFrame({
