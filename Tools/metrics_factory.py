@@ -215,20 +215,23 @@ def compute_metrics_for_period_initialize(log_return_df):
 
 
 if __name__ == '__main__':
-    # (open_df,  # 包含ETF基金的开盘价数据的数据框，行索引为日期，列索引为基金代码
-    #  high_df,  # 包含ETF基金的最高价数据的数据框，行索引为日期，列索引为基金代码
-    #  low_df,  # 包含ETF基金的最低价数据的数据框，行索引为日期，列索引为基金代码
-    #  close_df,  # 包含ETF基金的收盘价数据的数据框，行索引为日期，列索引为基金代码
-    #  change_df,  # 包含ETF基金的价格变动数据的数据框，行索引为日期，列索引为基金代码
-    #  pct_chg_df,  # 包含ETF基金的价格百分比变动数据的数据框，行索引为日期，列索引为基金代码
-    #  vol_df,  # 包含ETF基金的交易量数据的数据框，行索引为日期，列索引为基金代码
-    #  amount_df,  # 包含ETF基金的交易金额数据的数据框，行索引为日期，列索引为基金代码
-    #  log_return_df,  # 包含ETF基金的对数收益率数据的数据框，行索引为日期，列索引为基金代码
-    #  etf_info_df  # 包含ETF基金的基本信息的数据框，如基金代码、基金名称、投资类型等
-    #  ) = data_prepare()
+    (open_df,  # 包含ETF基金的开盘价数据的数据框，行索引为日期，列索引为基金代码
+     high_df,  # 包含ETF基金的最高价数据的数据框，行索引为日期，列索引为基金代码
+     low_df,  # 包含ETF基金的最低价数据的数据框，行索引为日期，列索引为基金代码
+     close_df,  # 包含ETF基金的收盘价数据的数据框，行索引为日期，列索引为基金代码
+     change_df,  # 包含ETF基金的价格变动数据的数据框，行索引为日期，列索引为基金代码
+     pct_chg_df,  # 包含ETF基金的价格百分比变动数据的数据框，行索引为日期，列索引为基金代码
+     vol_df,  # 包含ETF基金的交易量数据的数据框，行索引为日期，列索引为基金代码
+     amount_df,  # 包含ETF基金的交易金额数据的数据框，行索引为日期，列索引为基金代码
+     log_return_df,  # 包含ETF基金的对数收益率数据的数据框，行索引为日期，列索引为基金代码
+     etf_info_df  # 包含ETF基金的基本信息的数据框，如基金代码、基金名称、投资类型等
+     ) = data_prepare()
 
+    close_df.to_parquet('close_df.parquet')
+    the_close_df = pd.read_parquet('close_df.parquet')
+
+    log_return_df.to_parquet('log_return_df.parquet')
     the_log_return_df = pd.read_parquet('log_return_df.parquet')
-    compute_metrics_for_period_initialize(the_log_return_df)
 
 # # 获取交易日序列
 # trading_days = np.array(open_df.index)

@@ -266,27 +266,27 @@ log_return_metrics_dict = {
          '90% VaR = 在90%的置信水平下，投资组合可能的最大损失',
          ['2w', '1m', '2m', '3m', '5m', '6m', '12m', '2y', '3y', '5y', 'mtd', 'qtd', 'ytd'],
          ],
-    'ModifiedVaR-99':
-        ['99% 修正VaR',
-         '99% VaR = 在传统正态 VaR 的基础上，使用 Cornish-Fisher 展开修正尾部概率',
-         ['2w', '1m', '2m', '3m', '5m', '6m', '12m', '2y', '3y', '5y', 'mtd', 'qtd', 'ytd'],
-         ],
-    'ModifiedVaR-95':
-        ['95% VaR',
-         '95% VaR = 在传统正态 VaR 的基础上，使用 Cornish-Fisher 展开修正尾部概率',
-         ['2w', '1m', '2m', '3m', '5m', '6m', '12m', '2y', '3y', '5y', 'mtd', 'qtd', 'ytd'],
-         ],
-    'ModifiedVaR-90':
-        ['90% VaR',
-         '90% VaR = 在传统正态 VaR 的基础上，使用 Cornish-Fisher 展开修正尾部概率',
-         ['2w', '1m', '2m', '3m', '5m', '6m', '12m', '2y', '3y', '5y', 'mtd', 'qtd', 'ytd'],
-         ],
     'VaRSharpe-95':
         ['基于 95% VaR 计算夏普比率',
          '基于 95% VaR 计算夏普比率 = (投资组合收益率 - 无风险收益率) / 95% VaR',
          ['2w', '1m', '2m', '3m', '5m', '6m', '12m', '2y', '3y', '5y', 'mtd', 'qtd', 'ytd'],
          ],
-    'ModifiedVaRSharpe-95':
+    'VaRModified-99':
+        ['99% 修正VaR',
+         '99% 修正VaR = 在传统正态 VaR 的基础上，使用 Cornish-Fisher 展开修正尾部概率',
+         ['2w', '1m', '2m', '3m', '5m', '6m', '12m', '2y', '3y', '5y', 'mtd', 'qtd', 'ytd'],
+         ],
+    'VaRModified-95':
+        ['95% 修正VaR',
+         '95% 修正VaR = 在传统正态 VaR 的基础上，使用 Cornish-Fisher 展开修正尾部概率',
+         ['2w', '1m', '2m', '3m', '5m', '6m', '12m', '2y', '3y', '5y', 'mtd', 'qtd', 'ytd'],
+         ],
+    'VaRModified-90':
+        ['90% 修正VaR',
+         '90% 修正VaR = 在传统正态 VaR 的基础上，使用 Cornish-Fisher 展开修正尾部概率',
+         ['2w', '1m', '2m', '3m', '5m', '6m', '12m', '2y', '3y', '5y', 'mtd', 'qtd', 'ytd'],
+         ],
+    'VaRModifiedSharpe-95':
         ['基于 95% 修正VaR 计算夏普比率',
          '基于 95% 修正VaR 计算夏普比率 = (投资组合收益率 - 无风险收益率) / 95% 修正VaR',
          ['2w', '1m', '2m', '3m', '5m', '6m', '12m', '2y', '3y', '5y', 'mtd', 'qtd', 'ytd'],
@@ -306,17 +306,17 @@ log_return_metrics_dict = {
          '90% CVaR = 在90%的置信水平下，投资组合可能的平均损失',
          ['2w', '1m', '2m', '3m', '5m', '6m', '12m', '2y', '3y', '5y', 'mtd', 'qtd', 'ytd'],
          ],
-    'ModifiedCVaR-99':
+    'CVaRModified-99':
         ['99% 修正CVaR',
          '99% 修正CVaR = 在传统正态 CVaR 的基础上，使用 Cornish-Fisher 展开修正尾部概率',
          ['2w', '1m', '2m', '3m', '5m', '6m', '12m', '2y', '3y', '5y', 'mtd', 'qtd', 'ytd'],
          ],
-    'ModifiedCVaR-95':
+    'CVaRModified-95':
         ['95% 修正CVaR',
          '95% 修正CVaR = 在传统正态 CVaR 的基础上，使用 Cornish-Fisher 展开修正尾部概率',
          ['2w', '1m', '2m', '3m', '5m', '6m', '12m', '2y', '3y', '5y', 'mtd', 'qtd', 'ytd'],
          ],
-    'ModifiedCVaR-90':
+    'CVaRModified-90':
         ['90% 修正CVaR',
          '90% 修正CVaR = 在传统正态 CVaR 的基础上，使用 Cornish-Fisher 展开修正尾部概率',
          ['2w', '1m', '2m', '3m', '5m', '6m', '12m', '2y', '3y', '5y', 'mtd', 'qtd', 'ytd'],
@@ -326,7 +326,7 @@ log_return_metrics_dict = {
          '基于 95% CVaR 计算夏普比率 = (投资组合收益率 - 无风险收益率) / 95% CVaR',
          ['2w', '1m', '2m', '3m', '5m', '6m', '12m', '2y', '3y', '5y', 'mtd', 'qtd', 'ytd'],
          ],
-    'ModifiedCVaRSharpe-95':
+    'CVaRModifiedSharpe-95':
         ['基于 95% 修正CVaR 计算夏普比率',
          '基于 95% 修正CVaR 计算夏普比率 = (投资组合收益率 - 无风险收益率) / 95% 修正CVaR',
          ['2w', '1m', '2m', '3m', '5m', '6m', '12m', '2y', '3y', '5y', 'mtd', 'qtd', 'ytd'],
@@ -336,21 +336,21 @@ log_return_metrics_dict = {
          '分位数收益率 = 收益率的分位数',
          ['1m', '2m', '3m', '5m', '6m', '12m', '2y', '3y', '5y', 'mtd', 'qtd', 'ytd'],
          ],
-    'PercentileLoss-5':
-        ['5%分位数的负收益率',
-         '分位数收益率 = 收益率的分位数',
-         ['1m', '2m', '3m', '5m', '6m', '12m', '2y', '3y', '5y', 'mtd', 'qtd', 'ytd'],
-         ],
+    # 'PercentileLoss-5':   # 就是 VaR-95
+    #     ['5%分位数的负收益率',
+    #      '分位数收益率 = 收益率的分位数',
+    #      ['1m', '2m', '3m', '5m', '6m', '12m', '2y', '3y', '5y', 'mtd', 'qtd', 'ytd'],
+    #      ],
     'PercentileWin-10':
         ['10%分位数的正收益率',
          '分位数收益率 = 收益率的分位数',
          ['1m', '2m', '3m', '5m', '6m', '12m', '2y', '3y', '5y', 'mtd', 'qtd', 'ytd'],
          ],
-    'PercentileLoss-10':
-        ['10%分位数的负收益率',
-         '分位数收益率 = 收益率的分位数',
-         ['1m', '2m', '3m', '5m', '6m', '12m', '2y', '3y', '5y', 'mtd', 'qtd', 'ytd'],
-         ],
+    # 'PercentileLoss-10':  # 就是 VaR-90
+    #     ['10%分位数的负收益率',
+    #      '分位数收益率 = 收益率的分位数',
+    #      ['1m', '2m', '3m', '5m', '6m', '12m', '2y', '3y', '5y', 'mtd', 'qtd', 'ytd'],
+    #      ],
     'TailRatio-10':
         ['尾部比率, 极端正收益与极端负收益的比值',
          '尾部比率 = 极端正收益(90分位) / 极端负收益(10分位)',

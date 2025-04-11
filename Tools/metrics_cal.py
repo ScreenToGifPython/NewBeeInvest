@@ -10,6 +10,7 @@ import traceback
 import numpy as np
 import pandas as pd
 from functools import wraps
+from scipy.stats import norm, kurtosis, skew
 
 from Tools.metrics_cal_config import return_ann_factor, risk_ann_factor, log_ann_return, log_daily_return
 
@@ -55,6 +56,8 @@ def cache_metric(func):
         # 如果指标已经存在于缓存中，则直接返回缓存中的值
         if metric_name in self.res_dict:
             return self.res_dict[metric_name]
+        if metric_name.startswith('VaR') or metric_name.startswith('CVaR'):
+            metric_name = metric_name + '-' + str(int(kwargs["confidence_level"] * 100))
 
         # 调用被装饰函数计算结果，并将结果缓存到 `self.res_dict` 中
         result = func(self, *args, **kwargs)
@@ -65,6 +68,7 @@ def cache_metric(func):
     return wrapper
 
 
+# 金融指标计算器类
 class CalMetrics:
     def __init__(self, log_return_array, close_price_array, nature_days_in_p, trading_days_in_p,
                  trans_to_cumulative_return=False):
@@ -210,7 +214,7 @@ class CalMetrics:
         ratio = (self.cal_AnnualizedReturn() - log_ann_return) / self.cal_AnnualizedVolatility()
         return np.where(np.isnan(ratio), 0, ratio)
 
-    @cache_metric  # 索提诺比率
+    @cache_metric  # 夏普比率
     def cal_SharpeRatio(self, **kwargs):
         ratio = (self.cal_TotalReturn() - (log_daily_return * self.nature_days)) / self.cal_Volatility()
         return np.where(np.isnan(ratio), 0, ratio)
@@ -269,7 +273,7 @@ class CalMetrics:
 
         return np.where(np.isnan(gain_consistency), 0, gain_consistency)
 
-    @cache_metric  # 收益率偏度
+    @cache_metric  # 损失趋势一致性
     def cal_LossConsistency(self, **kwargs):
         # 筛选负收益
         loss_only = np.where(self.return_array < 0, self.return_array, np.nan)
@@ -301,57 +305,105 @@ class CalMetrics:
 
     @cache_metric  # 收益率偏度
     def cal_ReturnSkewness(self, **kwargs):
-        # 均值和标准差
-        mean = self.cal_AverageDailyReturn()
-        std = self.cal_Volatility()
-        # 中心化后的三阶矩
-        centered = self.return_array - mean
-        third_moment = np.nanmean(centered ** 3, axis=0)
-        # 偏度计算
-        skewness = third_moment / (std ** 3)
-        return skewness
+        return skew(self.return_array, axis=0, bias=False, nan_policy='omit')
 
     @cache_metric  # 收益率峰度
     def cal_ReturnKurtosis(self, excess=True, **kwargs):
-        # 均值和标准差
-        mean = self.cal_AverageDailyReturn()
-        std = self.cal_Volatility()
-        # 中心化后的四阶矩
-        centered = self.return_array - mean
-        fourth_moment = np.nanmean(centered ** 4, axis=0)
-        # 峰度计算
-        kurtosis = fourth_moment / (std ** 4)
-        # 对 std 为 0 的列，设为 NaN（避免除以 0）
-        kurtosis = np.where(std == 0, np.nan, kurtosis)
+        excess_kurtosis = kurtosis(self.return_array, axis=0, bias=False, nan_policy='omit')  # 返回的是超峰度
         if excess:
-            kurtosis -= 3  # 返回超额峰度
-        return kurtosis
+            return excess_kurtosis  # 正态分布的超峰度是 0
+        else:
+            return excess_kurtosis + 3  # 正态分布的总峰度是 3
 
-    @cache_metric
-    def cal_MaxConsecutiveWinsDays(self, **kwargs):
-        # 先将正收益标为 1，其他为 0（不包含0）
-        win_flags = (self.return_array > 0).astype(int)
+    @cache_metric  # 计算在险价值 (参数法)
+    def cal_VaR(self, confidence_level=0.99, **kwargs):
+        mean_return = self.cal_AverageDailyReturn()
+        std_return = self.cal_Volatility()
+        alpha = 1.0 - confidence_level
+        z_left = norm.ppf(alpha)
+        var = - (mean_return + z_left * std_return)
+        return np.maximum(var, 0.0)  # VaR 是损失，不小于0
 
-        # 结果数组
-        max_streaks = np.zeros(win_flags.shape[1], dtype=int)
+    @cache_metric  # 基于 VaR 计算夏普比率
+    def cal_VaRSharpe(self, confidence_level=0.99, **kwargs):
+        var_name = 'VaR' + '-' + str(int(confidence_level * 100))
+        ratio = (self.cal_TotalReturn() - (log_daily_return * self.nature_days)) / self.cal_metric(var_name)
+        # 将 inf 转为 0
+        ratio = np.where(np.isinf(ratio), 0, ratio)
+        return np.where(np.isnan(ratio), 0, ratio)
 
-        for i in range(win_flags.shape[1]):
-            series = win_flags[:, i]
-            # 处理 NaN 为 0，避免中断 streak
-            series = np.nan_to_num(series, nan=0).astype(int)
+    @cache_metric  # 计算 Cornish-Fisher修正后的在险价值 (参数法)
+    def cal_VaRModified(self, confidence_level=0.99, **kwargs):
+        mu = self.cal_AverageDailyReturn()
+        sigma = self.cal_Volatility()
+        skewness = self.cal_ReturnSkewness()
+        k_excess = self.cal_ReturnKurtosis()
 
-            # 使用累加法识别连续段
-            max_len = 0
-            current_len = 0
-            for val in series:
-                if val == 1:
-                    current_len += 1
-                    max_len = max(max_len, current_len)
-                else:
-                    current_len = 0
-            max_streaks[i] = max_len
+        alpha = 1.0 - confidence_level
+        z = norm.ppf(alpha)
 
-        return max_streaks
+        z_mod = (z
+                 + (skewness / 6.0) * (z ** 2 - 1.0)
+                 + (k_excess / 24.0) * (z ** 3 - 3.0 * z)
+                 - ((skewness ** 2) / 36.0) * (2.0 * z ** 3 - 5.0 * z)
+                 )
+
+        var_modified = - (mu + z_mod * sigma)
+        return np.maximum(var_modified, 0.0)
+
+    @cache_metric  # 基于 修正后的VaR 计算夏普比率
+    def cal_VaRModifiedSharpe(self, confidence_level=0.99, **kwargs):
+        var_name = 'VaRModified' + '-' + str(int(confidence_level * 100))
+        ratio = (self.cal_TotalReturn() - (log_daily_return * self.nature_days)) / self.cal_metric(var_name)
+        # 将 inf 转为 0
+        ratio = np.where(np.isinf(ratio), 0, ratio)
+        return np.where(np.isnan(ratio), 0, ratio)
+
+    @cache_metric  # 计算期望损失ES (参数法)
+    def cal_CVaR(self, confidence_level=0.99, **kwargs):
+        mu = self.cal_AverageDailyReturn()
+        sigma = self.cal_Volatility()
+        alpha = 1.0 - confidence_level
+        z = norm.ppf(alpha)
+        phi_z = norm.pdf(z)
+        cvar = - (mu - (sigma * phi_z) / alpha)
+        return np.maximum(cvar, 0.0)  # CVaR 是损失，不应为负
+
+    @cache_metric  # 基于 CVaR 计算夏普比率
+    def cal_CVaRSharpe(self, confidence_level=0.99, **kwargs):
+        cvar_name = 'CVaR' + '-' + str(int(confidence_level * 100))
+        ratio = (self.cal_TotalReturn() - (log_daily_return * self.nature_days)) / self.cal_metric(cvar_name)
+        # 将 inf 转为 0
+        ratio = np.where(np.isinf(ratio), 0, ratio)
+        return np.where(np.isnan(ratio), 0, ratio)
+
+    @cache_metric  # 计算 Cornish-Fisher修正后的期望损失ES (参数法)
+    def cal_CVaRModified(self, confidence_level=0.99, **kwargs):
+        mu = self.cal_AverageDailyReturn()
+        sigma = self.cal_Volatility()
+        alpha = 1.0 - confidence_level
+        skewness = self.cal_ReturnSkewness()
+        k_excess = self.cal_ReturnKurtosis()
+
+        alpha = 1.0 - confidence_level
+        z = norm.ppf(alpha)
+
+        z_mod = (z
+                 + (skewness / 6.0) * (z ** 2 - 1.0)
+                 + (k_excess / 24.0) * (z ** 3 - 3.0 * z)
+                 - ((skewness ** 2) / 36.0) * (2.0 * z ** 3 - 5.0 * z))
+
+        phi_z_mod = norm.pdf(z_mod)
+        cvar_mod = - (mu - (sigma * phi_z_mod) / alpha)
+        return np.maximum(cvar_mod, 0.0)
+
+    @cache_metric  # 基于 修正后的CVaR 计算夏普比率
+    def cal_CVaRModifiedSharpe(self, confidence_level=0.99, **kwargs):
+        cvar_name = 'CVaRModified' + '-' + str(int(confidence_level * 100))
+        ratio = (self.cal_TotalReturn() - (log_daily_return * self.nature_days)) / self.cal_metric(cvar_name)
+        # 将 inf 转为 0
+        ratio = np.where(np.isinf(ratio), 0, ratio)
+        return np.where(np.isnan(ratio), 0, ratio)
 
     # 调用不同指标计算的函数
     def cal_metric(self, metric_name, **kwargs):
@@ -369,16 +421,22 @@ class CalMetrics:
         if metric_name in ['MaxDrawDown', 'MaxDrawDownDays', 'ReturnDrawDownRatio',
                            'AnnReturnDrawDownRatio', 'DrawDownSlope', 'UlcerIndex']:
             return self.cal_max_draw_down_for_all(metric_name)
+        # VaR 指标的处理
+        elif metric_name.startswith('VaR'):
+            kwargs["confidence_level"] = float(metric_name.split("-")[1]) / 100
+            metric_name = metric_name.split("-")[0]
+        # CVaR 指标的处理
+        elif metric_name.startswith('CVaR'):
+            kwargs["confidence_level"] = float(metric_name.split("-")[1]) / 100
+            metric_name = metric_name.split("-")[0]
 
         method_name = f'cal_{metric_name}'
-        if hasattr(self, method_name):
-            try:
-                return getattr(self, method_name)()
-            except Exception as e:
-                print(f"Error when calling '{method_name}': {e}")
-                print(traceback.format_exc())
-        else:
+        try:
+            return getattr(self, method_name)(**kwargs)
+        except Exception as e:
             print(f"该方法不存在! Method '{method_name}' does not exist. 请确认是否有该指标!")
+            print(f"Error when calling '{method_name}': {e}")
+            print(traceback.format_exc())
 
 
 if __name__ == '__main__':
@@ -388,18 +446,19 @@ if __name__ == '__main__':
     the_close_price_array = the_close_price_array.resample('D').asfreq()
     the_log_return_df = the_log_return_df.resample('D').asfreq()
 
-    the_close_price_array = the_close_price_array.values[-20:, :10]
-    the_log_return_df = the_log_return_df.values[-20:, :10]
+    the_close_price_array = the_close_price_array.values[:, :10]
+    the_log_return_df = the_log_return_df.values[:, :10]
 
     # 删除所有全为 NaN 的行
     the_close_price_array = the_close_price_array[~np.all(np.isnan(the_close_price_array), axis=1)]
     the_log_return_df = the_log_return_df[~np.all(np.isnan(the_log_return_df), axis=1)]
-    the_close_price_array[:, 3] = 1
-    the_log_return_df[:, 3] = -0.001
-    the_log_return_df[:, 1] = 0.001
+    # the_close_price_array[:, 3] = 1
+    # the_log_return_df[:, 3] = -0.001
+    # the_log_return_df[:, 1] = 0.001
 
     c_m = CalMetrics(the_log_return_df, the_close_price_array, 61, 50)
-    res = c_m.cal_metric('ReturnSkewness')
+    res = c_m.cal_metric('CVaR-90')
     print(res)
-    res = c_m.cal_metric('ReturnKurtosis')
+    res = c_m.cal_metric('CVaRModified-90')
     print(res)
+    print(c_m.res_dict)
