@@ -22,7 +22,7 @@ log_daily_return = np.log(1 + daily_return)
 # 无风险对数年化收益率
 log_ann_return = np.log(1 + no_risk_ann_return)
 
-# 支持的区间代码
+# 区间指标支持的区间代码
 period_list = [
     '2d',  # 2天
     '3d',  # 3天
@@ -40,9 +40,10 @@ period_list = [
     'mtd',  # 本月至今（Month-to-Date）
     'qtd',  # 本季度至今（Quarter-to-Date）
     'ytd',  # 本年至今（Year-to-Date）
+    'max',  # 最大
 ]
 
-# 基于对数收益率计算的指标
+# 区间指标
 log_return_metrics_dict = {
     'TotalReturn':
         ['总收益率',  # 指标名称
@@ -462,7 +463,7 @@ log_return_metrics_dict = {
          ],
 }
 
-# 历史相对指标 (这些指标会基于上面已经计算好的指标来进行计算)
+# 历史偏离指标
 log_return_relative_metrics_dict = {
 
     ''' 相对历史收益指标 '''
@@ -570,6 +571,104 @@ log_return_relative_metrics_dict = {
          ],
 }
 
+# 滚动计算指标的滚动天数
+rolling_days = [
+    5, 10, 15, 30, 60, 120,
+]
+
+# 滚动计算指标
+rolling_metrics = {
+    'PriceSigma':
+        ['过去N天收盘价的滚动标准差',
+         ],
+    'MA':
+        ['N日移动平均收盘价',
+         ],
+    'BollUp':
+        ['bolling 上轨',
+         '布林带上轨 = N日移动平均收盘价 + 2 * N日移动标准差',
+         ],
+    'BollDo':
+        ['bolling 下轨',
+         '布林带下轨 = N日移动平均收盘价 - 2 * N日移动标准差',
+         ],
+    'L':
+        ['过去N天的最低价 (KDJ相关指标)',
+         ],
+    'H':
+        ['过去N天的最低价 (KDJ相关指标)',
+         ],
+    'RSV':
+        ['RSV指标 (KDJ相关指标)',
+         'RSV = (当前收盘价 - 最近N天最低价) / (最近N天最高价 - 最近N天最低价) * 100',
+         ],
+    'K':
+        ['KDJ 指标的 K 值',
+         'K = RSV 的指数移动平均值',
+         ],
+    'D':
+        ['KDJ 指标的 D 值',
+         'D = K 的指数移动平均值',
+         ],
+    'J':
+        ['KDJ 指标的 J 值',
+         'J = 3 * K - 2 * D',
+         ],
+    'EMA':
+        ['N日指数移动平均收盘价 (MACD相关指标)',
+         'EMA = ',
+         ],
+    'DIF':
+        ['MACD 指标的 DIF 值 (快线-趋势变化)',
+         'DIF = EMA12 - EMA26',
+         ],
+    'DEA':
+        ['MACD 指标的 DEA 值 (慢线-趋势平滑)',
+         'DEA = DIF 的指数移动平均值',
+         ],
+    'MACD':
+        ['MACD 值 (快线-慢线)',
+         'MACD = 2 (DIF - DEA)',
+         ],
+    'RSI':
+        ['RSI 指标 (相对强弱指数)',
+         'RSI = 过去N天收益之和 / (过去N天收益之和 + |过去N天亏损之和|)',
+         ],
+    'OBV':
+        ['OBV 指标 (能量潮指标)',
+         'OBV = ?',
+         ],
+    'DMA':
+        ['DMA 指标 (平均线差)',
+         'DMA = MAD短期 - MA长期',
+         ],
+    'MTM':
+        ['MTM 指标 (动量指标)',
+         'MTM = 当前收盘价 - N天前收盘价',
+         ],
+    'TRIX':
+        ['TRIX 指标 (三重指数平滑移动平均)',
+         'TRIX = EMA(EMA(EMA(收盘价))) / 收盘价 - 1',
+         ],
+    'BBI':
+        ['BBI 指标 (多空指标)',
+         'BBI = (MA3 + MA6 + MA12 + MA24) / 4',
+         ],
+    'PSY':
+        ['PSY 指标 (心理线)',
+         'PSY = 过去N天上涨天数 / 过去N天交易日数',
+         ],
+    'CCI':
+        ['CCI 指标 (顺势指标)',
+         'CCI = (当前收盘价 - N天移动平均价) / (0.015 * N天移动平均离差)',
+         ],
+    'CR':
+        ['CR 指标 (能量指标)',
+         'CR = (当日最高价 - 昨日收盘价) / (昨日收盘价 - 当日最低价)',
+         ],
+
+}
+
 
 # 创建一个按周期分组的指标映射表
 def create_period_metrics_map():
@@ -596,4 +695,5 @@ def create_period_metrics_map():
 
 
 if __name__ == '__main__':
-    print(create_period_metrics_map()['10y'])
+    # print(create_period_metrics_map()['10y'])
+    print(len(log_return_metrics_dict) * 13)

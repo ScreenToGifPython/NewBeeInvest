@@ -265,9 +265,15 @@ def compute_metrics_for_period_initialize(log_return_df, close_price_df,
                     continue
                 start_idx, end_idx = find_date_range_indices(nature_days_array, start_date, end_date)
                 days_in_p = end_idx - start_idx
+                # 将任务参数添加到任务列表中，每个任务包含以下信息：
                 task_args.append((
-                    end_date, start_idx, end_idx, days_in_p,
-                    funds_codes, period, period_metrics_map
+                    end_date,      # 当前计算周期的结束日期，表示指标计算的截止日期。
+                    start_idx,     # 指定日期范围在自然日数组中的起始索引位置。
+                    end_idx,       # 指定日期范围在自然日数组中的结束索引位置。
+                    days_in_p,     # 当前计算周期内的自然日数量，用于时间相关的指标计算。
+                    funds_codes,   # 基金代码数组，包含所有需要计算指标的基金代码。
+                    period,        # 当前计算的时间区间类型，例如'1m'(近一个月)、'qtd'(本季至今)等。
+                    period_metrics_map  # 时间区间与对应指标计算方法的映射关系，定义了每个区间需要计算哪些指标。
                 ))
 
             # 使用多进程执行任务
@@ -309,15 +315,17 @@ def compute_metrics_for_period_initialize(log_return_df, close_price_df,
                 # 计算区间内有多少个自然日
                 days_in_p = end_idx - start_idx
 
-                # 遍历计算该区间的指标
-                c_m = CalMetrics(funds_codes,
-                                 in_p_log_return_array,
-                                 in_p_close_price_array,
-                                 period,
-                                 days_in_p,
-                                 end_date,
-                                 5
-                                 )
+                # 创建CalMetrics类的实例，用于计算特定时间段内的基金指标
+                c_m = CalMetrics(
+                    funds_codes,  # 基金代码数组，包含所有需要计算指标的基金代码
+                    in_p_log_return_array,  # 在指定日期范围内的对数收益率数据，numpy数组格式
+                    in_p_close_price_array,  # 在指定日期范围内的收盘价数据，numpy数组格式
+                    period,  # 计算指标的时间区间类型，例如'1m'(近一个月)、'qtd'(本季至今)等
+                    days_in_p,  # 指定日期范围内自然日的数量，用于计算某些时间相关的指标
+                    end_date,  # 当前计算周期的结束日期，pd.Timestamp格式
+                    5  # 最小数据要求，表示计算指标时至少需要的数据点数量，默认为5
+                )
+
                 sub_df = c_m.cal_metric_main(period_metrics_map[period])
                 final_df.append(sub_df)
 
